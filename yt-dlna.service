@@ -1,0 +1,17 @@
+[Unit]
+Description=yt-dlna Media Server Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/yt-dlna
+ExecStart=/usr/bin/python3 /home/pi/yt-dlna/yt-dlna.py --serve
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

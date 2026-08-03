@@ -1,0 +1,206 @@
+# =============================================================================
+# yt-dlna configuration file (yt-dlna.conf)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# --- [proxy] HTTP proxy settings ---
+# -----------------------------------------------------------------------------
+
+[proxy]
+proxy_ip = 0.0.0.0
+proxy_port = 5000
+proxy_url_pattern = /play/{service}/{video_id}
+
+# operating mode: 'redirect' or 'proxy' or 'remux'
+# 'redirect': Responds with HTTP 302 redirect directly to CDN (ultra lightweight, for slow hardware)
+# 'proxy': Actively tunnels stream bytes from CDN to client (maximum TV compatibility)
+mode = redirect
+
+# cache resolved CDN URLs to eliminate yt-dlp latency on slow hardware
+enable_cache = yes
+
+# default cache lifetime in seconds (14400 = 4 hours)
+# this can also be set for each service in its services section
+default_cache_ttl = 14400
+
+
+# -----------------------------------------------------------------------------
+# --- [dlna] DLNA / UPnP server settings ---
+# -----------------------------------------------------------------------------
+
+[dlna]
+dlna_ip = 0.0.0.0
+dlna_port = 8200
+friendly_name = yt-dlna Media Server
+icon = assets/yt-dlna.png
+
+# leave blank to auto-detect this host's primary IP and the proxy parameters above
+stream_url_base = 
+stream_url_pattern = 
+
+
+# -----------------------------------------------------------------------------
+# --- [sync] playlist synchronization settings ---
+# -----------------------------------------------------------------------------
+
+[sync]
+enable_sync = yes
+
+# interval in seconds (3600 = 1 hour) after which playlists are refreshed automatically
+sync_interval = 3600
+
+# proactively pre-resolve missing or expired CDN URLs during sync to eliminate delays
+precache_cdn_urls = yes
+
+
+# -----------------------------------------------------------------------------
+# --- [yt-dlp] how and from where to load yt-dlp ---
+# -----------------------------------------------------------------------------
+
+[yt-dlp]
+# modes: 'import' (fastest, keeps in RAM) or 'exec' (runs external binary)
+mode = import
+executable_path = /usr/local/bin/yt-dlp
+
+
+# -----------------------------------------------------------------------------
+# --- [services] global service defaults ---
+# -----------------------------------------------------------------------------
+
+[services]
+# default cookies and login settings - they can be set for each service below
+cookie_path = data/cookies.txt
+
+# this is needed if you want to also get private playlists, such as watch later
+use_cookies_for_playlists = yes
+
+# this is normally not needed and also not recommended, unless you need unlisted/private videos
+use_cookies_for_playback = no
+
+# default yt-dlp format selector for progressive (single-file) MP4 video
+format = b[ext=mp4][protocol^=http] / 18 / b / best
+
+# default title template for DLNA video items
+# available placeholders: {index}, {channel}, {title}, {duration}
+# where {channel} is the channel or video author, depending on the service
+title_format = {index}. {channel}: {title} ({duration})
+
+
+# -----------------------------------------------------------------------------
+# --- [services:name] service definitions ---
+# -----------------------------------------------------------------------------
+
+# the [services:...] sections below define specific settings for each service;
+# if an option is not set, the value from [services] or [proxy] is used
+#
+# available per-service options:
+#   extractor                  yt-dlp extractor name (defaults to 'youtube')
+#   format                     format selector for yt-dlp
+#   cookie_path                path to Netscape cookie file relative to application root
+#   use_cookies_for_playlists  yes/no; required for private playlists like Watch Later
+#   use_cookies_for_playback   yes/no; for videos requiring user login
+#   enable_cache               yes/no; cache resolved CDN URLs to eliminate yt-dlp latency
+#   cache_ttl                  cache lifetime in seconds (0 = never expire).
+#   title_format               custom title template for this specific service.
+
+[services:youtube]
+extractor = youtube
+cookie_path = data/cookies-yt.txt
+cache_ttl = 18000
+title_format = {index}. {channel}: {title} ({duration})
+
+[services:ard]
+extractor = ard
+cache_ttl = 0
+title_format = {title} ({duration})
+
+[services:zdf]
+extractor = zdf
+cache_ttl = 0
+title_format = {title}
+
+
+# -----------------------------------------------------------------------------
+# --- [playlists] global playlist defaults ---
+# -----------------------------------------------------------------------------
+
+[playlists]
+# the default service to use for a playlist if none is specified; this again
+# defaults to 'youtube'
+default_service = youtube
+
+# maximum number of items to sync per playlist; no limit if not set or set to 0
+limit_items = 25
+
+# default sorting order: 'none' (default), 'reverse', 'date' (newest first),
+# 'date_asc' (oldest first), 'title', 'duration'; note that enabling sorting
+# may severely impact playlist extraction performance; for some playlists,
+# e.g. news shows, that are returned chronologically by the service anyway,
+# but with oldest first, using 'reverse' in conjunction with limit_items is
+# often the better choice over 'date', but should yield the same result
+sort_by = none
+
+
+# -----------------------------------------------------------------------------
+# --- [playlists:name] playlist definitions ---
+# -----------------------------------------------------------------------------
+
+# the [playlists:...] sections below define the virtual DLNA folders served to
+# clients; if an option is not set, the value from [playlists] or [services]
+# is used
+#
+# available per-playlist options:
+#   service           service profile to use from above; if not set, use the
+#                     default_service from the [services] section
+#   url               playlist ID (only for YouTube, e.g. WL) or full URL
+#   limit_items       override maximum items limit for this specific playlist;
+#                     unlimited if set to 0
+#   sort_by           override sorting order for this specific playlist
+
+[playlists:YouTube Watch Later]
+url = WL
+
+
+# -----------------------------------------------------------------------------
+# --- Example Playlists (uncomment to activate) ---
+# -----------------------------------------------------------------------------
+
+# note: 'YouTube Liked Videos' etc. can get very large, so remember to set limit_items!
+
+# [playlists:YouTube Liked Videos]
+# url = LL
+# limit_items = 20
+
+# [playlists:YouTube Favorites]
+# url = FL
+# limit_items = 20
+
+# [playlists:ARD tagesschau]
+# service = ard
+# url = https://www.ardmediathek.de/sendung/tagesschau/Y3JpZDovL2Rhc2Vyc3RlLmRlL3RhZ2Vzc2NoYXU
+# limit_items = 14
+
+# [playlists:ZDF heute 19 Uhr]
+# service = zdf
+# url = https://www.zdf.de/magazine/heute-19-uhr-102
+# limit_items = 14
+
+# [playlists:Unser Sandmännchen]
+# service = ard
+# url = https://www.ardmediathek.de/sendung/unser-sandmaennchen/Y3JpZDovL3JiYi1vbmxpbmUuZGUvc2FuZG1hbm4
+# limit_items = 14
+
+# [playlists:Die Sendung mit der Maus]
+# service = ard
+# url = https://www.ardmediathek.de/sendung/die-sendung-mit-der-maus/Y3JpZDovL2Rhc2Vyc3RlLmRlL3NlbmR1bmcgbWl0IGRlciBtYXVz
+# limit_items = 14
+
+# [playlists:SWR Aktuell RLP]
+# service = ard
+# url = https://www.ardmediathek.de/sendung/swr-aktuell-rheinland-pfalz/Y3JpZDovL3N3ci5kZS8yNDEyNjkw
+# limit_items = 14
+
+# [playlists:ZDF Magazin Royale]
+# service = zdf
+# url = https://www.zdf.de/shows/zdf-magazin-royale-102
+# limit_items = 10
