@@ -11,7 +11,7 @@ To accomplish the "heavy lifting", such as extracting playlists and CDN URLs (an
 ## Features
 
 * **Smart TV gateway:** Stream online playlists directly to older Smart TVs (as well as new ones, of course!) via built-in DLNA/UPnP players without ads or DASH/HLS demuxing issues.
-* **Instant start (<10 ms):** Proactively pre-caches live stream URLs in the background so video playback starts instantly on your TV.
+* **Instant start:** Proactively pre-caches live stream URLs in the background so video playback starts instantly on your TV.
 * **Multi-service & multi-account support:** Proxy content from YouTube, ARD Mediathek, and many other platforms (called _services_ in **yt-dlna**), as long as they are supported by `yt-dlp`. Define custom service profiles with different cookie files (e.g. separate YouTube profiles for family members).
 * **Cookie-free public playlists:** Access public or unlisted playlists anonymously without needing cookies.
 * **Cookie-free playback:** As long as the videos themselves are publicly visible, no cookie is needed for playback; however, for private videos, you can optionally choose to use one.
