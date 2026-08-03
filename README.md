@@ -1,4 +1,4 @@
-# yt-dlna
+# ![Logo](/assets/yt-dlna.png "yt-dlna Logo") yt-dlna
 
 **yt-dlna** is a lightweight online media gateway used for proxying streaming playlists to DLNA/UPnP clients.
 
