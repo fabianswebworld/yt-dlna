@@ -40,6 +40,10 @@ def run_sync(targets=None):
     playlists = utils.get_playlists_config()
 
     for pl in playlists:
+        if not pl.get('enabled', True):
+            # skip syncing if playlist not enabled
+            continue 
+
         folder_name = pl['title']
         service_name = pl['service']
         
@@ -112,6 +116,7 @@ def run_sync(targets=None):
                         # use extractor check to determine short ID vs full URL
                         if srv_cfg['extractor'] == 'youtube':
                             v_id = entry.get('id') or entry.get('url') or 'unknown'
+                            web_url = f"https://www.youtube.com/watch?v={v_id}"
                         else:
                             web_url = entry.get('webpage_url') or entry.get('url')
                             if web_url and (web_url.startswith('http://') or web_url.startswith('https://')):
@@ -142,7 +147,8 @@ def run_sync(targets=None):
                             "channel": channel_name,
                             "duration": duration_sec,
                             "upload_date": upload_date,
-                            "proxy_url": f"{base_url}{target_route}"
+                            "proxy_url": f"{base_url}{target_route}",
+                            "web_url": web_url
                         }
                         if pl_idx is not None:
                             item_dict["pl_index"] = pl_idx
@@ -167,20 +173,19 @@ def run_sync(targets=None):
                 if limit_items > 0:
                     video_list = video_list[:limit_items]
 
-                # --- proactively pre-cache CDN URL if enabled and missing/expired,
+                # --- proactively pre-cache CDN URLs if enabled and missing/expired,
                 # --- or expiring within next sync interval
-                if precache_enabled:
-                    for item in video_list:
-                        try:
-                            v_id = item['id']
-                            print(f"[Sync] Pre-caching {service_name}:{v_id}...")
-                            proxy.resolve_cdn_url(
-                                v_id, 
-                                service_name=service_name, 
-                                min_remaining_ttl=sync_interval
-                            )
-                        except Exception as e:
-                            print(f"[Sync] Pre-cache warning for {service_name}:{v_id}: {e}")
+                if precache_enabled and video_list:
+                    try:
+                        v_ids = [item['id'] for item in video_list]
+                        print(f"[Sync] Pre-caching {folder_name}...")
+                        proxy.resolve_cdn_urls_batch(
+                            v_ids, 
+                            service_name=service_name, 
+                            min_remaining_ttl=sync_interval
+                        )
+                    except Exception as e:
+                        print(f"[Sync] Pre-cache warning for {folder_name}: {e}")
             
             synced_entry = {folder_name: video_list}
 
@@ -229,6 +234,28 @@ def run_sync(targets=None):
     print(f"[Sync] Playlists synchronized.")
     if precache_enabled:
         print(f"[Sync] CDN URL cache updated.")
+
+def rename_playlist_data(old_name, new_name):
+    """Renames a playlist key in playlists.json using the internal file lock."""
+    with _file_lock:
+        if not os.path.exists(utils.JSON_PATH):
+            return
+        try:
+            with open(utils.JSON_PATH, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if not content: return
+                library = json.loads(content)
+
+            if old_name in library:
+                # atomically swap keys
+                library[new_name] = library.pop(old_name)
+                
+                with open(utils.JSON_PATH, 'w', encoding='utf-8') as f:
+                    json.dump(library, f, indent=4, ensure_ascii=False)
+                print(f"[Sync] Library entry renamed: '{old_name}' -> '{new_name}'")
+        except Exception as e:
+            print(f"[Sync] Error renaming library entry: {e}")
+            raise e
 
 if __name__ == "__main__":
     run_sync()

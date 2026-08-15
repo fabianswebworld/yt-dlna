@@ -9,12 +9,55 @@
 [proxy]
 proxy_ip = 0.0.0.0
 proxy_port = 5000
-proxy_url_pattern = /play/{service}/{video_id}
 
-# operating mode: 'redirect' or 'proxy' or 'remux'
+# default operating mode: 'redirect' or 'proxy'
 # 'redirect': Responds with HTTP 302 redirect directly to CDN (ultra lightweight, for slow hardware)
 # 'proxy': Actively tunnels stream bytes from CDN to client (maximum TV compatibility)
 mode = redirect
+
+# default play route that will use operating mode defined by 'mode' setting;
+# optionally switching to remux if enabled and conditions met (see below)
+proxy_url_pattern = /play/{service}/{video_id}
+
+# additional routes that will enforce specific operating modes:
+
+# will enforce redirect mode
+proxy_url_pattern_redirect = /redirect/{service}/{video_id}
+
+# will enforce proxy mode
+proxy_url_pattern_proxy = /proxy/{service}/{video_id}
+
+# will enforce remux mode, fallback to proxy mode if no DASH stream
+proxy_url_pattern_remux = /remux/{service}/{video_id}
+
+# the following two routes will skip any yt-dlp CDN URL resolving,
+# and are used for Custom Playlists with known, static target URLs,
+# so no {service} part for those; also, the {video_id} for those has
+# to be always a full, and correctly escaped, URL:
+
+# will enforce bounce mode - like redirect, but redirects the client
+# to source URL directly (without any CDN resolving)
+proxy_url_pattern_bounce = /bounce/{video_id}
+
+# will enforce reflect mode - like proxy, but tunnels bytes from
+# source URL directly (without any CDN resolving)
+proxy_url_pattern_reflect = /reflect/{video_id}
+
+# enable on-the-fly remultiplexing via ffmpeg if quality of available progressive MP4
+# is below remux_threshold; otherwise, the selected mode above is used (note that on services
+# where remultiplexing is desired, you need to set appropriate format_dash options)
+enable_remux = yes
+
+# minimum vertical resolution height in pixels (e.g. 720 or 1080) to require for MP4;
+# if progressive MP4 is below this threshold, yt-dlna uses ffmpeg DASH remuxing;
+# if not set or set to 0, then remuxing is always done, as long as the service has
+# a format_dash selector
+remux_threshold = 720
+
+# target stream format for remultiplexing, possible modes are 'ts' (MPEG-TS)
+# or 'mp4' (fragmented MP4 file with multiple 'moof' boxes); change according to
+# what your client supports (MPEG-TS is generally more suitable for TVs)
+remux_target_format = ts
 
 # cache resolved CDN URLs to eliminate yt-dlp latency on slow hardware
 enable_cache = yes
@@ -37,6 +80,16 @@ icon = assets/yt-dlna.png
 # leave blank to auto-detect this host's primary IP and the proxy parameters above
 stream_url_base = 
 stream_url_pattern = 
+
+
+# -----------------------------------------------------------------------------
+# --- [dashboard] dashboard webserver settings ---
+# -----------------------------------------------------------------------------
+
+[dashboard]
+enable_dashboard = yes
+dashboard_ip = 0.0.0.0
+dashboard_port = 5001
 
 
 # -----------------------------------------------------------------------------
@@ -64,6 +117,16 @@ executable_path = /usr/local/bin/yt-dlp
 
 
 # -----------------------------------------------------------------------------
+# --- [ffmpeg] where to find ffmpeg (for remuxing only) ---
+# -----------------------------------------------------------------------------
+
+[ffmpeg]
+executable_path = /usr/bin/ffmpeg
+# additional options to append to ffmpeg command line (e.g., separate logging)
+add_opts = 
+
+
+# -----------------------------------------------------------------------------
 # --- [services] global service defaults ---
 # -----------------------------------------------------------------------------
 
@@ -72,13 +135,20 @@ executable_path = /usr/local/bin/yt-dlp
 cookie_path = data/cookies.txt
 
 # this is needed if you want to also get private playlists, such as watch later
-use_cookies_for_playlists = yes
+use_cookies_for_playlists = no
 
 # this is normally not needed and also not recommended, unless you need unlisted/private videos
 use_cookies_for_playback = no
 
 # default yt-dlp format selector for progressive (single-file) MP4 video
 format = b[ext=mp4][protocol^=http] / 18 / b / best
+
+# default yt-dlp format selector for desired DASH streams;
+# only used if enable_remux is set in the [proxy] section and there
+# is no self-contained MP4 available better than remux_threshold
+# IMPORTANT: Do not set this option here unless you want to use DASH
+# remuxing for all services!
+format_dash = 
 
 # default title template for DLNA video items
 # available placeholders: {index}, {channel}, {title}, {duration}
@@ -95,17 +165,22 @@ title_format = {index}. {channel}: {title} ({duration})
 #
 # available per-service options:
 #   extractor                  yt-dlp extractor name (defaults to 'youtube')
-#   format                     format selector for yt-dlp
 #   cookie_path                path to Netscape cookie file relative to application root
 #   use_cookies_for_playlists  yes/no; required for private playlists like Watch Later
 #   use_cookies_for_playback   yes/no; for videos requiring user login
+#   format                     yt-dlp format selector for progressive MP4
+#   format_dash                yt-dlp format selector for DASH streams, only used
+#                              if enable_remux is set and video height is below
+#                              remux_threshold, both in the [proxy] section
 #   enable_cache               yes/no; cache resolved CDN URLs to eliminate yt-dlp latency
-#   cache_ttl                  cache lifetime in seconds (0 = never expire).
-#   title_format               custom title template for this specific service.
+#   cache_ttl                  cache lifetime in seconds (0 = never expire)
+#   title_format               custom title template for this specific service
 
 [services:youtube]
 extractor = youtube
+use_cookies_for_playlists = yes
 cookie_path = data/cookies-yt.txt
+format_dash = (137/136/135)+140
 cache_ttl = 18000
 title_format = {index}. {channel}: {title} ({duration})
 
@@ -154,53 +229,53 @@ sort_by = none
 #                     default_service from the [services] section
 #   url               playlist ID (only for YouTube, e.g. WL) or full URL
 #   limit_items       override maximum items limit for this specific playlist;
-#                     unlimited if set to 0
+#                     unlimited if set to 0 (note: 'YouTube Liked Videos' etc.
+#                     can get very large, so remember to set limit_items!)
 #   sort_by           override sorting order for this specific playlist
 
 [playlists:YouTube Watch Later]
 url = WL
 
+[playlists:YouTube Liked Videos]
+url = LL
+limit_items = 20
+enabled = no
 
-# -----------------------------------------------------------------------------
-# --- Example Playlists (uncomment to activate) ---
-# -----------------------------------------------------------------------------
+[playlists:YouTube Favorites]
+url = FL
+limit_items = 20
+enabled = no
 
-# note: 'YouTube Liked Videos' etc. can get very large, so remember to set limit_items!
+[playlists:ARD tagesschau]
+service = ard
+url = https://www.ardmediathek.de/sendung/tagesschau/Y3JpZDovL2Rhc2Vyc3RlLmRlL3RhZ2Vzc2NoYXU
+limit_items = 14
 
-# [playlists:YouTube Liked Videos]
-# url = LL
-# limit_items = 20
+[playlists:ZDF heute 19 Uhr]
+service = zdf
+url = https://www.zdf.de/magazine/heute-19-uhr-102
+limit_items = 14
 
-# [playlists:YouTube Favorites]
-# url = FL
-# limit_items = 20
+[playlists:Unser Sandmännchen]
+service = ard
+url = https://www.ardmediathek.de/sendung/unser-sandmaennchen/Y3JpZDovL3JiYi1vbmxpbmUuZGUvc2FuZG1hbm4
+limit_items = 14
+enabled = no
 
-# [playlists:ARD tagesschau]
-# service = ard
-# url = https://www.ardmediathek.de/sendung/tagesschau/Y3JpZDovL2Rhc2Vyc3RlLmRlL3RhZ2Vzc2NoYXU
-# limit_items = 14
+[playlists:Die Sendung mit der Maus]
+service = ard
+url = https://www.ardmediathek.de/sendung/die-sendung-mit-der-maus/Y3JpZDovL2Rhc2Vyc3RlLmRlL3NlbmR1bmcgbWl0IGRlciBtYXVz
+limit_items = 14
+enabled = no
 
-# [playlists:ZDF heute 19 Uhr]
-# service = zdf
-# url = https://www.zdf.de/magazine/heute-19-uhr-102
-# limit_items = 14
+[playlists:SWR Aktuell RLP]
+service = ard
+url = https://www.ardmediathek.de/sendung/swr-aktuell-rheinland-pfalz/Y3JpZDovL3N3ci5kZS8yNDEyNjkw
+limit_items = 14
+enabled = no
 
-# [playlists:Unser Sandmännchen]
-# service = ard
-# url = https://www.ardmediathek.de/sendung/unser-sandmaennchen/Y3JpZDovL3JiYi1vbmxpbmUuZGUvc2FuZG1hbm4
-# limit_items = 14
-
-# [playlists:Die Sendung mit der Maus]
-# service = ard
-# url = https://www.ardmediathek.de/sendung/die-sendung-mit-der-maus/Y3JpZDovL2Rhc2Vyc3RlLmRlL3NlbmR1bmcgbWl0IGRlciBtYXVz
-# limit_items = 14
-
-# [playlists:SWR Aktuell RLP]
-# service = ard
-# url = https://www.ardmediathek.de/sendung/swr-aktuell-rheinland-pfalz/Y3JpZDovL3N3ci5kZS8yNDEyNjkw
-# limit_items = 14
-
-# [playlists:ZDF Magazin Royale]
-# service = zdf
-# url = https://www.zdf.de/shows/zdf-magazin-royale-102
-# limit_items = 10
+[playlists:ZDF Magazin Royale]
+service = zdf
+url = https://www.zdf.de/shows/zdf-magazin-royale-102
+limit_items = 10
+enabled = no
