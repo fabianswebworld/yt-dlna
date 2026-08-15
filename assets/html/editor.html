@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>yt-dlna - Custom Playlist Editor</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container" style="max-width: 1200px;">
+        <header class="header">
+            <div class="brand">
+                <img src="/icon.png" alt="Logo" class="logo">
+                <div>
+                    <h1 id="editor-title">Editing Playlist</h1>
+                    <p class="subtitle"><strong>yt-dlna</strong> &#8226; Custom Playlist Editor</p>
+                </div>
+            </div>
+            <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
+                <div class="actions">
+                    <button class="btn primary" onclick="saveData()">Save Changes</button>
+                    <button class="btn secondary" onclick="closeEditor()">Close</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="editor-container">
+            <!-- Sidebar: The Hierarchy -->
+            <div class="tree-sidebar">
+                <div class="actions margin-bottom" style="gap: 5px; flex-wrap: wrap;">
+                    <button class="btn secondary btn-small" onclick="addNode('folder', true)">+ Folder</button>
+                    <button class="btn secondary btn-small" onclick="addNode('item', true)">+ Item</button>
+                    <button class="btn secondary btn-small" onclick="triggerM3UImport()">Import M3U</button>
+                </div>
+                <div id="tree-root" class="tree-view"></div>
+            </div>
+
+            <!-- Main: Item Properties -->
+            <div id="properties-panel" class="properties-panel hidden">
+                <h3 id="prop-header">Item Properties</h3>
+                <div class="form-stack margin-top">
+                    <div class="form-group">
+                        <label id="disp-name-label">Display Name</label>
+                        <input type="text" id="node-name" oninput="updateActiveNode()">
+                    </div>
+                    <div id="item-only-fields">
+                        <div class="form-group">
+                            <label>Source URL</label>
+                            <input type="text" id="node-url" oninput="updateActiveNode()" placeholder="http://...">
+                        </div>
+                    </div>
+                    <div id="item-mime-group" class="form-group hidden">
+                        <label>Media MIME Type</label>
+                        <select id="node-mime" oninput="updateActiveNode()">
+                            <option value="">Auto-detect</option>
+                            <option value="audio/mpeg">audio/mpeg (MP3)</option>
+                            <option value="audio/mp4">audio/mp4 (M4A/AAC)</option>
+                            <option value="audio/aac">audio/aac (AAC)</option>
+                            <option value="video/mp4">video/mp4 (MP4)</option>
+                            <option value="video/mpeg">video/mpeg (MPEG-TS)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Proxy Mode</label>
+                        <select id="node-mode" oninput="updateActiveNode()">
+                            <option value="" id="mode-inherit-opt">Inherit from parent</option>
+                            <option value="direct">direct (source URL)</option>
+                            <option value="bounce">bounce (redirect)</option>
+                            <option value="reflect">reflect (tunnel)</option>
+                            <option value="hit">hit (action trigger, stream dummy file)</option>
+                        </select>
+                    </div>
+                    <div class="actions margin-top">
+                        <button class="btn danger" onclick="deleteActiveNode()">Delete Selected</button>
+                    </div>
+                </div>
+            </div>
+            <!-- Main: Empty State -->
+            <div id="empty-panel" class="properties-panel">
+                <div class="empty-state">
+                    <svg class="icon" style="width: 48px; height: 48px; opacity: 0.3;" viewBox="0 0 24 24"><path fill="currentColor" d="M13,9V3.5L18.5,9M6,2c-1.1,0-2,0.9-2,2v16c0,1.1,0.89,2,1.99,2H18c1.1,0,2-0.9,2-2V8L14,2H6Z"/></svg>
+                    <p>Select a folder or item from the list to view or edit its properties.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <input type="file" id="m3u-input" accept=".m3u,.m3u8,.bm,.bm8" style="display: none;" onchange="handleImportFile(this)">
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/editor.js"></script>
+</body>
+</html>
