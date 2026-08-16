@@ -42,7 +42,7 @@ To accomplish the "heavy lifting", such as extracting playlists and CDN URLs (an
 - **OS:** Platform-independent; Linux (Raspberry Pi OS, Debian, Ubuntu, etc.) recommended
 - **Python:** 3.10 or higher
 - **Dependencies:** `yt-dlp`, `flask`, `requests` (optional: `ffmpeg` for on-the-fly remuxing)
-- **Permissions:** `yt-dlna` needs to create and write to `yt-dlna.conf` in its own script directory, and create a `data/` directory and write to it
+- **Permissions:** **yt-dlna** needs to create and write to `yt-dlna.conf` in its own script directory, and create a `data/` directory and write to it
 
 ## How it works
 
@@ -258,7 +258,7 @@ To run **yt-dlna** automatically in the background at boot on Linux:
 
 ### Metadata and content data flow
 
-On a regular basis, yt-dlp will sync your favorite playlists from the video services to a local playlists.json file, and then present that file as virtual DLNA/UPnP "folders" to your Smart TV. The key point is that the entries themselves will not point to any external URL, but instead to virtual URLs provided by an internal proxy service, under which a specific video will always be available inside your local network. Here's how the metadata flow looks:
+On a regular basis, **yt-dlna** will sync your favorite playlists from the video services to a local playlists.json file, and then present that file as virtual DLNA/UPnP "folders" to your Smart TV. The key point is that the entries themselves will not point to any external URL, but instead to virtual URLs provided by an internal proxy service, under which a specific video will always be available inside your local network. Here's how the metadata flow looks:
 
 ```text
 [Streaming Service] ◄─── (yt-dlp) ── [yt-dlna UPnP server] ◄─ (UPnP) ── [Client]
