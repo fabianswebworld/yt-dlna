@@ -183,7 +183,8 @@ Items in custom playlists will _never_ be resolved to CDN URLs via the built-in 
 
 - _bounce_ mode, which is like the _redirect_ mode but without CDN resolving (i.e. it will do a 302 redirect directly to the source URL defined in the Custom Playlist) - the client will see a proxy URL with a `/bounce/` route and will receive a HTTP 302 from there.
 - _reflect_ mode, which is like the _proxy_ mode but without CDN resolving (i.e. it will tunnel the bytes through the proxy thread) - the client will see a proxy URL with a `/reflect/` route and will receive the source bytes from there.
-- _direct_ mode, which will just insert the plain source URL into the DLNA listing (for clients that allow media from outside the local network)
+- _hit_ mode, which will just 'hit' the source URL from the backend (and will serve a silent dummy audio file to the client) - ideal for triggering actions in your home automation system (see below).
+- _direct_ mode, which will just insert the plain source URL into the DLNA listing (for clients that allow media from outside the local network).
 
 While the web UI will only allow for _creation_ of Custom Playlist files inside the `data/` folder, manual editing of the `playlist_file` option for that Custom Playlist will allow for .json files from outside there.
 
