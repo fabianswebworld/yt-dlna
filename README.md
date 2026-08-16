@@ -21,11 +21,21 @@ To accomplish the "heavy lifting", such as extracting playlists and CDN URLs (an
 - **Low hardware requirements:** Optimized specifically for older and low-powered single-board computers, performing well even on a hardware as old as a Raspberry Pi 1.
 - **On-demand DLNA refresh:** Trigger a playlist resync directly from your TV menu using virtual `[Click to Refresh]` items.
 
-![Screenshot - Dashboard - Overview](/doc/images/yt-dlna-dashboard.png "Dashboard - Overview")
+## Screenshots
+
 ![Screenshot - Dashboard - Online Playlists Tab](/doc/images/yt-dlna-online-playlists.png "Dashboard - Online Playlists Tab")
-![Screenshot - Dashboard - Online Playlist Example](/doc/images/yt-dlna-online-playlist-example.png "Dashboard - Online Playlist Example")
-![Screenshot - Dashboard - Service Example](/doc/images/yt-dlna-service-settings-example.png "Dashboard - Service Example")
-![Screenshot - Dashboard - Custom Playlist Editor](/doc/images/yt-dlna-custom-playlist-editor.png "Dashboard - Custom Playlist Editor")
+
+<details>
+    <summary>More Screenshots...</summary>
+    <p>Dashboard Overview:</p>
+    <img src="https://raw.githubusercontent.com/fabianswebworld/yt-dlna/main/doc/images/yt-dlna-dashboard.png" alt="Screenshot - Dashboard - Overview" />
+    <p>Example of configuring an Online Playlist:</p>
+    <img src="https://raw.githubusercontent.com/fabianswebworld/yt-dlna/main/doc/images/yt-dlna-online-playlist-example.png" alt="Screenshot - Dashboard - Online Playlist Example" />
+    <p>Example of configuring a Service:</p>
+    <img src="https://raw.githubusercontent.com/fabianswebworld/yt-dlna/main/doc/images/yt-dlna-service-settings-example.png" alt="Screenshot - Dashboard - Service Example" />
+    <p>Custom Playlist Editor:</p>
+    <img src="https://raw.githubusercontent.com/fabianswebworld/yt-dlna/main/doc/images/yt-dlna-custom-playlist-editor.png" alt="Screenshot - Dashboard - Custom Playlist Editor" />
+</details>
 
 ## Prerequisites
 
