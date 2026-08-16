@@ -10,26 +10,27 @@ To accomplish the "heavy lifting", such as extracting playlists and CDN URLs (an
 
 ## Features
 
-* **Smart TV gateway:** Stream online playlists directly to older Smart TVs (as well as new ones, of course!) via built-in DLNA/UPnP players without ads or DASH/HLS demuxing issues.
-* **Instant start:** Proactively pre-caches live stream URLs in the background so video playback starts instantly on your TV.
-* **Multi-service & multi-account support:** Proxy content from YouTube, ARD Mediathek, and many other platforms (called _services_ in **yt-dlna**), as long as they are supported by `yt-dlp`. Define custom service profiles with different cookie files (e.g. separate YouTube profiles for family members).
-* **Web Administration Dashboard:** Manage playlists, streaming service profiles, cookies, and system settings via an embedded web dashboard (`http://host:5001`).
-* **On-the-fly remuxing:** Automatically remultiplexes the best available high-resolution DASH streams (1080p H.264 + AAC) in-memory via `ffmpeg` to a highly TV-compatible single-file MPEG-TS stream or fragmented MP4 stream when progressive MP4s are unavailable or below the configured resolution threshold (`remux_threshold`).
-* **Cookie-free public playlists:** Access public or unlisted playlists anonymously without needing cookies.
-* **Cookie-free playback:** As long as the videos themselves are publicly visible, no cookie is needed for playback; however, for private videos, you can optionally choose to use one.
-* **Low hardware requirements:** Optimized specifically for older and low-powered single-board computers, performing well even on a hardware as old as a Raspberry Pi 1.
-* **On-demand DLNA refresh:** Trigger a playlist resync directly from your TV menu using virtual `[Click to Refresh]` items.
+- **Smart TV gateway:** Stream online playlists directly to older Smart TVs (as well as new ones, of course!), using their built-in DLNA/UPnP players, without ads or DASH/HLS demuxing issues.
+- **Instant start:** Proactively pre-caches live stream URLs in the background so video playback starts instantly on your TV.
+- **On-the-fly remuxing:** Automatically remultiplexes the best available high-resolution DASH streams (1080p H.264 + AAC) in-memory via `ffmpeg` to a highly TV-compatible single-file MPEG-TS stream or fragmented MP4 stream when progressive MP4s are unavailable or below the configured resolution threshold (`remux_threshold`).
+- **Multi-service & multi-account support:** Proxy content from YouTube, ARD Mediathek, and many other platforms (called _services_ in **yt-dlna**), as long as they are supported by `yt-dlp`. Define custom service profiles with different cookie files (e.g. separate YouTube profiles for family members).
+- **Cookie-free public playlists:** Access public or unlisted playlists anonymously without needing cookies.
+- **Cookie-free playback:** As long as the videos themselves are publicly visible, no cookie is needed for playback; however, for private videos, you can optionally choose to use one.
+- **Custom playlists:** Create user-curated, hierarchical playlists, e.g. with bookmarks to your favorite web radio stations, to stream them to your DLNA client, or use 'hit' mode to trigger actions in 3rd-party systems. This way, you can even use your UPnP/DLNA client to control your Smart Home system! 
+- **Web Administration Dashboard:** Manage playlists, streaming service profiles, cookies, and system settings via an embedded web dashboard (`http://host:5001`).
+- **Low hardware requirements:** Optimized specifically for older and low-powered single-board computers, performing well even on a hardware as old as a Raspberry Pi 1.
+- **On-demand DLNA refresh:** Trigger a playlist resync directly from your TV menu using virtual `[Click to Refresh]` items.
 
 ## Prerequisites
 
-* **OS:** Platform-independent; Linux (Raspberry Pi OS, Debian, Ubuntu, etc.) recommended
-* **Python:** 3.10 or higher
-* **Dependencies:** `yt-dlp`, `flask`, `requests` (optional: `ffmpeg` for on-the-fly remuxing)
-* **Permissions:** `yt-dlna` needs to create a `data` folder inside its directory and write to it
+- **OS:** Platform-independent; Linux (Raspberry Pi OS, Debian, Ubuntu, etc.) recommended
+- **Python:** 3.10 or higher
+- **Dependencies:** `yt-dlp`, `flask`, `requests` (optional: `ffmpeg` for on-the-fly remuxing)
+- **Permissions:** `yt-dlna` needs to create and write to `yt-dlna.conf` in its own script directory, and create a `data/` directory and write to it
 
 ## How it works
 
-In short, there are three core components which go hand in hand to accomplish the task to present your online video playlists as DLNA views on your TV:
+In short, these are the core components which go hand in hand to accomplish the task to present your online video playlists as DLNA views on your TV:
 
 1. **Sync Engine (`sync.py`):** Periodically indexes configured playlists using `yt-dlp`, extracting raw metadata (titles, channels, durations) and pre-caching direct CDN URLs.
 2. **DLNA Engine (`dlna_server.py`):** Broadcasts SSDP discovery beacons and serves a virtual folder tree to your TV via UPnP.
@@ -103,23 +104,23 @@ If your Smart TV refuses to play the videos on your first attempt, fear not, and
 
 `yt-dlna.conf` is fully documented with in-line comments. It is divided into the following main sections:
 
-* **`[proxy]`**: Controls HTTP bind IP/port, proxying mode (`redirect` vs `proxy`), and CDN URL caching parameters.
-* **`[dlna]`**: Controls UPnP server name, bind parameters, and icon paths.
-* **`[dashboard]`**: Configures the Dashboard Web UI.
-* **`[sync]`**: Controls automatic sync intervals and proactive CDN URL pre-caching.
-* **`[yt-dlp]`**: Configures how to load, and where to find, `yt-dlp` (via import, or as an external binary)
-* **`[ffmpeg]`**: Configures and where to find `ffmpeg` (required only for remuxing) and which custom extra options to pass to it
-* **`[services:...]`**: Configures individual streaming extractors, format selectors, title templates, and cookie paths.
-* **`[playlists:...]`**: Defines the source playlists (online playlists) which are then served as virtual DLNA folders to your clients (target URLs, item limits, sort criteria).
-* **`[custom_playlists:...]`**: Defines custom, locally-curated, hierarchical playlists (JSON files) that can be edited by you at any time and may be used e.g. as a "bookmarks" folder for your favorite radio streaming URLs.
+- **`[proxy]`**: Controls HTTP bind IP/port, proxying mode (`redirect` vs `proxy`), and CDN URL caching parameters.
+- **`[dlna]`**: Controls UPnP server name, bind parameters, and icon paths.
+- **`[dashboard]`**: Configures the Dashboard Web UI.
+- **`[sync]`**: Controls automatic sync intervals and proactive CDN URL pre-caching.
+- **`[yt-dlp]`**: Configures how to load, and where to find, `yt-dlp` (via import, or as an external binary)
+- **`[ffmpeg]`**: Configures and where to find `ffmpeg` (required only for remuxing) and which custom extra options to pass to it
+- **`[services:...]`**: Configures individual streaming extractors, format selectors, title templates, and cookie paths.
+- **`[playlists:...]`**: Defines the source playlists (online playlists) which are then served as virtual DLNA folders to your clients (target URLs, item limits, sort criteria).
+- **`[custom_playlists:...]`**: Defines custom, locally-curated, hierarchical playlists (JSON files) that can be edited by you at any time and may be used e.g. as a "bookmarks" folder for your favorite radio streaming URLs.
 
 If you want to configure manually, please read the in-line documentation.
 
 ### Configuration web interface
 
-Starting with version 1.1.0, all the configuration can be done via a web UI (called the _Dashboard_), which by default is accessible via `http://yt-dlna-host:5001`. This includes definition and configuration of services and playlists.
+Starting with version 1.1.0, all the configuration can be done via a web UI (called the _Dashboard_), which by default is accessible via `http://yt-dlna-host:5001`. This includes definition and configuration of services and playlists, including reordering them via drag-and-drop, and editing [Custom Playlists](#about-custom-playlists) via a built-in tree editor.
 
-Additionally, the dashboard shows you statistics of how many videos have been served in which mode, how many CDN URLs are currently in cache, and more.
+Additionally, the Dashboard shows you statistics of how many videos have been served in which mode, how many CDN URLs are currently in cache, and more.
 
 ### Important things to note
 
@@ -153,6 +154,28 @@ If you enable the remultiplexing mode (`enable_remux`), remuxing is automaticall
 In practice, it is mostly only needed for YouTube as of today, which is why in the example configuration file, `enable_remux` is enabled by default, and a `format_dash` string is configured _only_ for YouTube.
 
 If remuxing is not enabled or not necessary (e.g. because an MP4 is available with sufficient resolution), the configured proxy mode (`mode`) is used, i.e. ``redirect`` or ``proxy`` (see above).
+
+## About Custom Playlists
+
+Starting with version 1.1.0, a new feature called "Custom Playlists" is available. These playlists are saved and curated locally, without syncing from any streaming portal.
+
+These playlists can have a hierarchical structure and are viewed as (sub-)folders on your UPnP client. They are saved as JSON files, by default in the `data/` folder, and can be created and edited using the built-in _Custom Playlist Editor_ in the Dashboard web interface.
+
+The built-in editor supports creating and editing items and folders manually; however, for bulk-importing existing bookmark lists, you an also import .m3u/.m3u8 playlist files and Winamp.bm/Winamp.bm8 bookmark files into the selected folder.
+
+Items in custom playlists will _never_ be resolved to CDN URLs via the built-in proxy. Instead, one of three specific modes are used for them (configurable for each item, or each folder, or the whole playlist, where the setting will be inherited to the next sub-item if set to "inherit" there):
+
+- _bounce_ mode, which is like the _redirect_ mode but without CDN resolving (i.e. it will do a 302 redirect directly to the source URL defined in the Custom Playlist) - the client will see a proxy URL with a `/bounce/` route and will receive a HTTP 302 from there.
+- _reflect_ mode, which is like the _proxy_ mode but without CDN resolving (i.e. it will tunnel the bytes through the proxy thread) - the client will see a proxy URL with a `/reflect/` route and will receive the source bytes from there.
+- _direct_ mode, which will just insert the plain source URL into the DLNA listing (for clients that allow media from outside the local network)
+
+While the web UI will only allow for _creation_ of Custom Playlist files inside the `data/` folder, manual editing of the `playlist_file` option for that Custom Playlist will allow for .json files from outside there.
+
+### Integration with Home Automation systems
+
+Due to that feature's very flexible nature, it is even possible to use .json files dynamically created by a third-party process, like a home automation (Smart Home) system.
+
+The home automation system could, for example, regularly update and store readings and values to that file (e.g., temperature sensor readings), which would then be presented as virtual "Item Titles" in a DLNA folder, while other items showing the state of a device ("Living Room Lights - on") could even have "hit" mode URLs that could trigger actions such as "Lights on/off" - the possibilities are endless... 😉
 
 ## Usage & CLI Commands
 

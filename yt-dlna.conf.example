@@ -173,7 +173,8 @@ title_format = {index}. {channel}: {title} ({duration})
 #                              if enable_remux is set and video height is below
 #                              remux_threshold, both in the [proxy] section
 #   enable_cache               yes/no; cache resolved CDN URLs to eliminate yt-dlp latency
-#   cache_ttl                  cache lifetime in seconds (0 = never expire)
+#   cache_ttl                  cache lifetime in seconds (0 = never expire); if not set,
+#                              default_cache_ttl from the [proxy] section is used
 #   title_format               custom title template for this specific service
 
 [services:youtube]
@@ -221,12 +222,11 @@ sort_by = none
 # -----------------------------------------------------------------------------
 
 # the [playlists:...] sections below define the virtual DLNA folders served to
-# clients; if an option is not set, the value from [playlists] or [services]
-# is used
+# clients; if an option is not set, the value from [playlists] is used
 #
 # available per-playlist options:
 #   service           service profile to use from above; if not set, use the
-#                     default_service from the [services] section
+#                     default_service from the [playlists] section
 #   url               playlist ID (only for YouTube, e.g. WL) or full URL
 #   limit_items       override maximum items limit for this specific playlist;
 #                     unlimited if set to 0 (note: 'YouTube Liked Videos' etc.

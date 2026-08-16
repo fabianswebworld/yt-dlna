@@ -1,10 +1,12 @@
-1.1.0 (not yet released)
+1.1.0 (2026-08-16)
 
 - New: Introduced on-the-fly DASH remultiplexing via ffmpeg
 - New: Added Web UI (dashboard and configuration interface) with light and dark mode
+- New: Added Custom Playlists feature for hierarchical, locally-curated playlists
 - New: Added more proxy routes to select specific modes independently from the default operating mode
 - Improved: Optimized URL resolving performance by letting yt-dlp batch-resolve a collection of playlist items at once
 - Improved: Optimized DLNA Server compatibility with more clients
+- Improved: Configuration file is automatically created from example on first run
 - Fixed: Fixed a possible race condition when updating URL cache file
 - Fixed: Config file was not correctly interpreted as UTF-8 if running on Windows
 

@@ -881,6 +881,9 @@ function isOverridden(section, key) {
 }
 
 function getGlobalValue(sectionType, key) {
+    if (sectionType === 'services' && key === 'cache_ttl') {
+        return (parsedConfigData['proxy'] && parsedConfigData['proxy']['default_cache_ttl']) || "14400";
+    }
     return (parsedConfigData[sectionType] && parsedConfigData[sectionType][key]) || "";
 }
 
@@ -941,6 +944,11 @@ async function saveServiceCard(sec, oldSName) {
     collectField(updateData, `srv-fmt-${oldSName}`, 'format', isGlobal);
     collectField(updateData, `srv-fmtdash-${oldSName}`, 'format_dash', isGlobal);
     collectField(updateData, `srv-ttl-${oldSName}`, 'cache_ttl', isGlobal);
+    if (isGlobal && updateData.hasOwnProperty('cache_ttl')) {
+        if (!parsedConfigData['proxy']) parsedConfigData['proxy'] = {};
+        parsedConfigData['proxy']['default_cache_ttl'] = updateData['cache_ttl'];
+        delete updateData['cache_ttl']; 
+    }
     collectField(updateData, `srv-titlefmt-${oldSName}`, 'title_format', isGlobal);
 
     parsedConfigData[currentSec] = updateData;
@@ -964,7 +972,13 @@ function renderServicesTab(configData) {
         const opts = configData[sec] || {};
 
         const checkOverride = (key) => isGlobal || isOverridden(sec, key);
-        const getVal = (key) => checkOverride(key) ? (opts[key] ?? resOpts[key]) : getGlobalValue('services', key);
+        const getVal = (key) => {
+            if (isGlobal && key === 'cache_ttl') {
+                return (configData.proxy && configData.proxy.default_cache_ttl) || "14400";
+            }
+            if (checkOverride(key)) return opts[key] ?? resOpts[key];
+            return getGlobalValue('services', key);
+        };
 
         return `
             <div class="service-card collapsed" id="service-card-${escapeJs(sName)}">

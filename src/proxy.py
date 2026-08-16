@@ -387,6 +387,7 @@ def _serve_remux_implementation(cached_entry, identifier):
     
     target_fmt = config.get('proxy', 'remux_target_format', fallback='ts').strip().lower()
     print(f"[Proxy] Remuxing DASH to {target_fmt.upper()} for {identifier} on the fly via ffmpeg...")
+    utils.record_stream_event('remuxed')
     
     ffmpeg_path = config.get('ffmpeg', 'executable_path', fallback='/usr/bin/ffmpeg').strip()
     add_opts_str = config.get('ffmpeg', 'add_opts', fallback='').strip()
