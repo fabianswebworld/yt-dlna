@@ -84,7 +84,7 @@ See section [Metadata and content data flow](#metadata-and-content-data-flow) fo
 
    Since everything can be configured via the **Web Dashboard** starting with version 1.1.0, there's no need to edit the configuration beforehand (although you can still do this). If no configuration file is present, it will be created from the example file automatically, and you can go to the Web UI (the Dashboard) right away! Simply point your browser to
 
-   http://192.168.x.x:5001/
+   http://yt-dlna-host:5001/
 
    to access it.
 
@@ -110,7 +110,7 @@ See section [Metadata and content data flow](#metadata-and-content-data-flow) fo
 
 ### Videos don't play, or in low quality only?
 
-If your Smart TV refuses to play the videos on your first attempt, fear not, and **first try to change the _Default operating mode_ in the _Proxy settings_ section** on the _Settings_ tab of the Web UI from **_redirect_** to **_proxy_** (or change the `mode` setting in the `[proxy]` section of `yt-dlna.conf` from `redirect` to `proxy`). This will increase CPU and network load on the system `yt-dlna` is running on (as the streams will have to physically go into and out of the system's network interface), but it improves the chance that it will work on your TV. Just try!
+If your Smart TV refuses to play the videos on your first attempt, fear not, and **first try to change the _Default operating mode_ in the _Proxy settings_ section** on the _Settings_ tab of the Web UI from **_redirect_** to **_proxy_** (or change the `mode` setting in the `[proxy]` section of `yt-dlna.conf` from `redirect` to `proxy`). This will increase CPU and network load on the system **yt-dlna** is running on (as the streams will have to physically go into and out of the system's network interface), but it improves the chance that it will work on your TV. Just try!
 
 **If you don't like the quality of YouTube videos** (360p) which are delivered using the default settings, you can enable the **_Enable on-the-fly remuxing with FFmpeg_** option on the _Settings_ page. Note this will increase CPU and memory load even more, and is **not guaranteed to work at all** with your client (which is why it is disabled by default). If the original _Remux target format_ of _MPEG-TS_ doesn't work for your client, you can also try the _MP4_ setting, which works better in some clients (but not at all in most other, which again is why _MPEG-TS_ is the default).
 
@@ -142,7 +142,7 @@ Additionally, the Dashboard shows you statistics of how many videos have been se
 
 Everything is heavily optimized for speed and low hardware requirements. For that reason, the decision which extractor to use for a certain video service is not done through the URL, inside ``yt-dlp``, which in that case would have to load all "Information Extractors" every time, but defined in the configuration file for each service.
 
-Just like `yt-dlp`, `yt-dlna` has its roots in handling YouTube streams. That's why YouTube (i.e., services defined using the 'youtube' extractor) are handled a little bit different than the others: only for YouTube, you can define playlists with just their playlist id as `url` in the config; for all others, you need to specify the full web URL of the playlist.
+Just like `yt-dlp`, **yt-dlna** has its roots in handling YouTube streams. That's why YouTube (i.e., services defined using the 'youtube' extractor) are handled a little bit different than the others: only for YouTube, you can define playlists with just their playlist id as `url` in the config; for all others, you need to specify the full web URL of the playlist.
 
 Similarly, YouTube video URLs are treated differently by the proxy service: you can always access URLs like `http://yt-dlna-host:5000/play/youtube/{video_id}` from inside your network, just providing the YouTube video id.
 
@@ -151,11 +151,11 @@ For all other services than `youtube` (which is a hard-coded default even if not
 Additionally, here's some especially neat things about certain configuration combinations:
 
 - If you create multiple services that all use the same extractor (e.g., 'youtube'), but different `cookie_path` options, you can use multiple accounts, e.g. multiple users' "Watch Later" playlists.
-- If you do not specify any playlist and set `enable_sync = yes` in the `[sync]` section, you can effectively use `yt-dlna` as just a `yt-dlp`-powered stream proxy, enabling you to watch YouTube or other online videos on any device on your network by just opening e.g. `http://yt-dlna-host:5000/play/youtube/{video_id}` in the player or browser of your choice (it will take some seconds if that video has never been played before, though - but afterwards, it will be available until the CDN URL expires, which is usually 6 hours for YouTube).
+- If you do not specify any playlist and set `enable_sync = no` in the `[sync]` section, you can effectively use **yt-dlna** as just a `yt-dlp`-powered stream proxy, enabling you to watch YouTube or other online videos on any device on your network by just opening e.g. `http://yt-dlna-host:5000/play/youtube/{video_id}` in the player or browser of your choice (it will take some seconds if that video has never been played before, though - but afterwards, it will be available until the CDN URL expires, which is usually 6 hours for YouTube).
 
 ## About the remultiplexing mode (``enable_remux``)
 
-Due to the very nature of the UPnP/DLNA protocol and especially limitations of older clients (such as TVs), **yt-dlna**' needs to deliver plain, self-contained (pre-muxed) files accessible via HTTP/HTTPS, using codecs supported by most devices. This basically means: MP4 files with H.264 video and AAC audio, which most streaming services still provide - but for some of them, and most importantly, for YouTube, this unfortunately means limited media quality. For YouTube, the only MP4 stream URLs provided by the CDN are 360p MP4 files, which makes watching much less enjoyable. All higher quality streams are only available via MPEG-DASH, which means separate files for audio and video.
+Due to the very nature of the UPnP/DLNA protocol and especially limitations of older clients (such as TVs), **yt-dlna** needs to deliver plain, self-contained (pre-muxed) files accessible via HTTP/HTTPS, using codecs supported by most devices. This basically means: MP4 files with H.264 video and AAC audio, which most streaming services still provide - but for some of them, and most importantly, for YouTube, this unfortunately means limited media quality. For YouTube, the only MP4 stream URLs provided by the CDN are 360p MP4 files, which makes watching much less enjoyable. All higher quality streams are only available via MPEG-DASH, which means separate files for audio and video.
 
 For that reason, starting with version 1.1.0, a new **remultiplexing mode** has been introduced. This needs `ffmpeg` to be installed, and if it is enabled, it will automatically use it to remux the separate DASH streams to one single, progressive file (either in MPEG-TS or fragmented MP4 format) and deliver it to the client. All this is done on-the-fly and in-memory with zero disk writes, and works well already on very old hardware.
 
@@ -193,6 +193,8 @@ While the web UI will only allow for _creation_ of Custom Playlist files inside 
 Due to that feature's very flexible nature, it is even possible to use .json files dynamically created by a third-party process, like a home automation (Smart Home) system.
 
 The home automation system could, for example, regularly update and store readings and values to that file (e.g., temperature sensor readings), which would then be presented as virtual "Item Titles" in a DLNA folder, while other items showing the state of a device ("Living Room Lights - on") could even have "hit" mode URLs that could trigger actions such as "Lights on/off" - the possibilities are endless... 😉
+
+An example implementation of a helper module for the _FHEM_ home automation system (98_ytdlnaCustomPlaylistFrontend.pm), to enable dynamic generation of such "interactive" Custom Playlist files, is available in [this separate repository](https://github.com/fabianswebworld/fhem-yt-dlna-custom-playlist-frontend).
 
 ## Usage & CLI Commands
 
