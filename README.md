@@ -276,7 +276,7 @@ However, this has a few implications in comparison to the old sync scheduler: Ev
 
 Only if you trigger a "Sync all Online Playlists" action from the Web UI (or via `yt-dlna.py --sync`), those schedule times will be aligned again.
 
-If you prefer a behavior that (almost) matches the old scheduler's behavior, you can choose to include the `--sync` argument together with the `--sync` argument in your service file, which is now supported.
+If you prefer a behavior that (almost) matches the old scheduler's behavior, you can choose to include the `--sync` argument together with the `--serve` argument in your service file, which is now supported.
 
 Moreover, due to a rework of the JSON save operations, it is now possible to issue `--sync` commands as separate processes while the daemon is running without any risk of file corruption. This means that you could even create your own, complex sync schedule using cronjobs.
 
