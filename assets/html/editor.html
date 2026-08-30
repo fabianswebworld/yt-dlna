@@ -19,8 +19,8 @@
             <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
                 <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
                 <div class="actions">
-                    <button class="btn primary" onclick="saveData()">Save Changes</button>
-                    <button class="btn secondary" onclick="closeEditor()">Close</button>
+                    <button class="btn btn-small primary" onclick="saveData()">Save Changes</button>
+                    <button class="btn btn-small secondary" onclick="closeEditor()">Close</button>
                 </div>
             </div>
         </header>
@@ -29,9 +29,9 @@
             <!-- Sidebar: The Hierarchy -->
             <div class="tree-sidebar">
                 <div class="actions margin-bottom" style="gap: 5px; flex-wrap: wrap;">
-                    <button class="btn secondary btn-small" onclick="addNode('folder', true)">+ Folder</button>
-                    <button class="btn secondary btn-small" onclick="addNode('item', true)">+ Item</button>
-                    <button class="btn secondary btn-small" onclick="triggerM3UImport()">Import M3U</button>
+                    <button class="btn btn-small secondary" onclick="addNode('folder', true)">+ Folder</button>
+                    <button class="btn btn-small secondary" onclick="addNode('item', true)">+ Item</button>
+                    <button class="btn btn-small secondary" onclick="triggerM3UImport()">Import M3U</button>
                 </div>
                 <div id="tree-root" class="tree-view"></div>
             </div>

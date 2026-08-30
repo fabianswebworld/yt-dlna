@@ -15,20 +15,22 @@ import re
 import threading
 import subprocess
 import urllib.parse
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, Response, jsonify, send_from_directory, stream_with_context
 import flask.cli
+import queue
 import logging
 import utils
 import sync
+
+_LOG_SRC = __name__
 
 # silence Flask development server warning banner
 flask.cli.show_server_banner = lambda *args: None
 
 # disable Flask/Werkzeug access logging (only show errors)
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
+flask_log = logging.getLogger('werkzeug')
+flask_log.setLevel(logging.ERROR)
 
-config = utils.load_config()
 app = Flask(__name__)
 
 app.json.sort_keys = False 
@@ -52,6 +54,7 @@ def index_routes():
 @app.route('/icon.png')
 def serve_icon():
     """Serves the server logo directly from yt-dlna.conf config without duplication."""
+    config = utils.load_config()
     icon_setting = config.get('dlna', 'icon', fallback='assets/yt-dlna.png').strip()
     if icon_setting:
         icon_path = icon_setting if os.path.isabs(icon_setting) else os.path.join(utils.CONFIG_DIR, icon_setting)
@@ -114,7 +117,7 @@ def view_playlist(playlist_name):
     playlist_name = urllib.parse.unquote(playlist_name)
     is_custom = request.path.startswith('/playlist/custom/')
     
-    cfg = utils.load_config()
+    config = utils.load_config()
     base_url = utils.get_stream_base_url()
     
     if is_custom:
@@ -132,7 +135,7 @@ def view_playlist(playlist_name):
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             root_mode = data.get('mode') or 'bounce'
-            links_html = _render_custom_hierarchy(data.get('children', []), root_mode, base_url, cfg)
+            links_html = _render_custom_hierarchy(data.get('children', []), root_mode, base_url, config)
             back_url = "/playlists/custom"
 
     else:
@@ -143,8 +146,15 @@ def view_playlist(playlist_name):
             with open(utils.JSON_PATH, 'r', encoding='utf-8') as f:
                 library = json.load(f)
         
-        items = library.get(playlist_name, [])
-        redirect_pattern = cfg.get('proxy', 'proxy_url_pattern_redirect', fallback='/redirect/{service}/{video_id}')
+        raw_data = library.get(playlist_name, [])
+        if isinstance(raw_data, dict):
+            items = raw_data.get('items', [])
+            pl_service = raw_data.get('service', 'youtube')
+        else:
+            items = raw_data
+            pl_service = None
+
+        redirect_pattern = config.get('proxy', 'proxy_url_pattern_redirect', fallback='/redirect/{service}/{video_id}')
         links_html = ""
         back_url = "/playlists/online"
 
@@ -159,7 +169,7 @@ def view_playlist(playlist_name):
                 web_url = item_id
 
             v_id_encoded = urllib.parse.quote(item_id, safe='')
-            service = str(item.get('service', 'youtube'))
+            service = str(pl_service or item.get('service', 'youtube'))
             download_link = f"{base_url}{redirect_pattern.replace('{service}', service).replace('{video_id}', v_id_encoded)}"
 
             links_html += f"""
@@ -198,7 +208,7 @@ def view_playlist(playlist_name):
             <div class="header-right">
                 <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
                 <div class="actions">
-                    <a href="{back_url}" class="btn secondary">Back to Dashboard</a>
+                    <a href="{back_url}" class="btn btn-small secondary">Back to Dashboard</a>
                 </div>
             </div>
         </header>
@@ -225,29 +235,25 @@ def static_assets(filename):
 
 @app.route('/api/status', methods=['GET'])
 def get_status():
-    """Returns application status, version, playlist counts, and stream statistics."""
-    library = {}
-    if os.path.exists(utils.JSON_PATH):
-        try:
-            with open(utils.JSON_PATH, 'r', encoding='utf-8') as f:
-                library = json.load(f)
-        except Exception:
-            pass
-
-    cache_count = 0
-    if os.path.exists(utils.CACHE_PATH):
-        try:
-            with open(utils.CACHE_PATH, 'r', encoding='utf-8') as f:
-                cache_data = json.load(f)
-                cache_count = len(cache_data)
-        except Exception:
-            pass
-
+    """Returns app status, version, playlist counts and sync times, stream statistics etc."""
+    config = utils.load_config()
+    library = utils.get_library()
     playlist_summary = []
-    for name, items in library.items():
+    for name, data in library.items():
+        if isinstance(data, dict):
+            count = len(data.get('items', []))
+            service = data.get('service', 'unknown')
+            last_sync = data.get('last_sync', 0)
+        else:
+            count = len(data) if isinstance(data, list) else 0
+            service = 'unknown'
+            last_sync = 0
+
         playlist_summary.append({
             'title': name,
-            'count': len(items) if isinstance(items, list) else 0
+            'count': count,
+            'service': service,
+            'lastSync': last_sync
         })
 
     return jsonify({
@@ -257,7 +263,7 @@ def get_status():
         'dlna_port': config.getint('dlna', 'dlna_port', fallback=8200),
         'proxy_port': config.getint('proxy', 'proxy_port', fallback=5000),
         'dashboard_port': config.getint('dashboard', 'dashboard_port', fallback=5001),
-        'cache_entries': cache_count,
+        'cache_entries': utils.get_cache_count(),
         'playlists': playlist_summary,
         'stats': utils.STREAM_STATS
     })
@@ -268,7 +274,7 @@ def trigger_api_sync():
     data = request.get_json(silent=True) or {}
     target = data.get('target')
     
-    print(f"[Dashboard] Sync triggered via Web UI for target: '{target or 'all'}'")
+    utils.log(_LOG_SRC, f"Sync triggered via Web UI for target: '{target or 'all'}'")
     threading.Thread(target=sync.run_sync, args=(target,), daemon=True).start()
     
     return jsonify({
@@ -279,15 +285,14 @@ def trigger_api_sync():
 @app.route('/api/reload', methods=['POST'])
 def reload_configuration():
     """Forces an in-process reload of yt-dlna.conf configuration."""
-    global config
-    config = utils.load_config()
-    print("[Dashboard] In-process configuration reload triggered.")
+    utils.load_config(force_reload=True)
+    utils.log(_LOG_SRC, "In-process configuration reload triggered.")
     return jsonify({'status': 'success', 'message': 'Configuration reloaded successfully'})
 
 @app.route('/api/restart', methods=['POST'])
 def restart_daemon():
     """Triggers a service restart via process termination. Proper service setup is assumed."""
-    print("[Dashboard] Daemon restart requested from Web UI...")
+    utils.log(_LOG_SRC, "Daemon restart requested from Web UI...")
     
     def delayed_restart():
         time.sleep(1)
@@ -300,12 +305,12 @@ def restart_daemon():
 def handle_parsed_config():
     """Reads or updates structured configuration preserving INI comments."""
     if request.method == 'GET':
-        cfg = utils.load_config()
+        config = utils.load_config()
         parsed_out = {}
         
         # export raw section dicts for form values
-        for section in cfg.sections():
-            parsed_out[section] = dict(cfg[section])
+        for section in config.sections():
+            parsed_out[section] = dict(config[section])
             
         # attach fully-resolved service configs computed natively by utils.py
         resolved_services = {}
@@ -313,7 +318,7 @@ def handle_parsed_config():
         # global defaults, read config for pseudo-service 'global'
         resolved_services['global'] = utils.get_service_config('global')
         
-        for section in cfg.sections():
+        for section in config.sections():
             if section.startswith('services:'):
                 s_name = section.replace('services:', '')
                 resolved_services[s_name] = utils.get_service_config(s_name)
@@ -333,7 +338,7 @@ def handle_parsed_config():
             parsed_data.pop('resolved_services', None)
 
             utils.update_config_from_dict(parsed_data)
-            print("[Dashboard] yt-dlna.conf updated via web UI.")
+            utils.log(_LOG_SRC, "yt-dlna.conf updated via web UI.", level=4)
             return jsonify({'status': 'success', 'message': 'Configuration updated successfully'})
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -348,12 +353,12 @@ def handle_single_config_key():
         if not section or not key:
             return jsonify({'status': 'error', 'message': 'Missing section or key parameter'}), 400
 
-        cfg = utils.load_config()
+        config = utils.load_config()
         
-        if not cfg.has_section(section):
+        if not config.has_section(section):
             return jsonify({'status': 'error', 'message': f'Section [{section}] not found'}), 404
 
-        value = cfg.get(section, key, fallback=None)
+        value = config.get(section, key, fallback=None)
         if value is None:
             return jsonify({'status': 'error', 'message': f'Key "{key}" not found in section [{section}]'}), 404
 
@@ -375,7 +380,7 @@ def handle_single_config_key():
 
         try:
             utils.update_config_single_key(section, key, str(value))
-            print(f"[Dashboard] Config update: [{section}] {key} = {value}")
+            utils.log(_LOG_SRC, f"Config update: [{section}] {key} = {value}", level=4)
             return jsonify({'status': 'success', 'message': 'Configuration updated'})
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -403,10 +408,40 @@ def handle_config():
         try:
             with open(utils.CONFIG_FILE, 'w', encoding='utf-8') as f:
                 f.write(new_config_text)
-            print("[Dashboard] yt-dlna.conf updated via web UI (raw editor).")
+            utils.log(_LOG_SRC, "yt-dlna.conf updated via web UI (raw editor).", level=4)
             return jsonify({'status': 'success', 'message': 'Configuration saved successfully'})
+            utils.load_config(force_reload=True)
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/logs')
+def api_logs():
+    # returns the last 1000 lines as a JSON list
+    return jsonify(utils.get_buffered_logs())
+
+@app.route('/api/logs/stream')
+def stream_logs():
+    def generate():
+        q = utils.subscribe_logs()
+        history = utils.get_buffered_logs()
+        
+        seen_ids = {item['id'] for item in history}
+        
+        try:
+            for old_entry in history:
+                yield f"data: {json.dumps(old_entry)}\n\n"
+            
+            while True:
+                log_id, json_str = q.get()
+                if log_id in seen_ids:
+                    continue
+                yield f"data: {json_str}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            utils.unsubscribe_logs(q)
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/api/upload-cookies', methods=['POST'])
 def upload_cookies():
@@ -436,7 +471,7 @@ def upload_cookies():
             if file.filename == '':
                 return jsonify({'status': 'error', 'message': 'No file selected'}), 400
             file.save(target_path)
-            print(f"[Dashboard] Cookie file created via Web UI: {rel_filename}")
+            utils.log(_LOG_SRC, f"Cookie file created via Web UI: {rel_filename}", level=4)
             return jsonify({
                 'status': 'success', 
                 'message': f"Saved to {rel_filename}",
@@ -448,7 +483,7 @@ def upload_cookies():
         if cookie_text:
             with open(target_path, 'w', encoding='utf-8') as f:
                 f.write(cookie_text)
-            print(f"[Dashboard] Cookie text saved via Web UI: {rel_filename}")
+            utils.log(_LOG_SRC, f"Cookie text saved via Web UI: {rel_filename}", level=4)
             return jsonify({
                 'status': 'success', 
                 'message': f"Saved to {rel_filename}",
@@ -527,15 +562,14 @@ def add_custom_playlist():
     try:
         # create physical file
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, 'w', encoding='utf-8') as f:
-            json.dump([], f)
+        utils.replace_save_json(full_path, [])
         
         # add to yt-dlna.conf registry
         sec = f"custom_playlists:{name}"
         utils.update_config_single_key(sec, 'playlist_file', file_rel_path)
         utils.update_config_single_key(sec, 'enabled', 'yes')
         
-        print(f"[Dashboard] Custom Playlist file '{name}' created at {file_rel_path}.")
+        utils.log(_LOG_SRC, f"Custom Playlist file '{name}' created at {file_rel_path}.")
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -546,7 +580,7 @@ def delete_online_playlist():
     if not name: return jsonify({'status': 'error', 'message': 'Name missing'}), 400
     
     utils.delete_config_section(f"playlists:{name}")
-    print(f"[Dashboard] Online playlist '{name}' deleted.")
+    utils.log(_LOG_SRC, f"Online playlist '{name}' deleted.")
     return jsonify({'status': 'success'})
 
 @app.route('/api/playlists/<any(online, custom):pl_type>/reorder', methods=['POST'])
@@ -562,7 +596,7 @@ def reorder_playlists(pl_type):
         prefix = 'playlists' if pl_type == 'online' else 'custom_playlists'
         
         utils.reorder_config_sections(prefix, new_order)
-        print(f"[Dashboard] {pl_type.capitalize()} playlists reordered.")
+        utils.log(_LOG_SRC, f"{pl_type.capitalize()} playlists reordered.")
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -575,20 +609,20 @@ def delete_custom_playlist():
     if not name:
         return jsonify({'status': 'error', 'message': 'Name missing'}), 400
     
-    cfg = utils.load_config()
+    config = utils.load_config()
     section = f"custom_playlists:{name}"
-    file_rel_path = cfg.get(section, 'playlist_file', fallback=None)
+    file_rel_path = config.get(section, 'playlist_file', fallback=None)
     if file_rel_path:
         full_path, error = utils.get_secure_path(file_rel_path, check_exists=False)
 
         if error:
             # block the deletion attempt if it points outside data/ directory
-            print(f"[Dashboard] Deletion of '{file_rel_path}' blocked: {error}")
+            utils.log(_LOG_SRC, f"Deletion of '{file_rel_path}' blocked: {error}", level=2, type='W')
             return jsonify({'status': 'error', 'message': f"Access Denied: {error}"}), 403
 
         if os.path.exists(full_path):
             os.remove(full_path)
-            print(f"[Dashboard] Custom Playlist file '{file_rel_path}' deleted.")
+            utils.log(_LOG_SRC, f"Custom Playlist file '{file_rel_path}' deleted.")
 
     utils.delete_config_section(section)
     return jsonify({'status': 'success'})
@@ -601,9 +635,9 @@ def handle_custom_playlist_data():
         return jsonify({'status': 'error', 'message': 'Playlist name required'}), 400
 
     # look up file path
-    cfg = utils.load_config()
+    config = utils.load_config()
     section = f"custom_playlists:{name}"
-    file_rel_path = cfg.get(section, 'playlist_file', fallback=None)
+    file_rel_path = config.get(section, 'playlist_file', fallback=None)
     
     if not file_rel_path:
         return jsonify({'status': 'error', 'message': 'Playlist not found in registry'}), 404
@@ -621,8 +655,7 @@ def handle_custom_playlist_data():
     elif request.method == 'POST':
         new_data = request.get_json()
         try:
-            with open(full_path, 'w', encoding='utf-8') as f:
-                json.dump(new_data, f, indent=4, ensure_ascii=False)
+            utils.replace_save_json(full_path, new_data, indent=4)
             return jsonify({'status': 'success'})
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -633,11 +666,28 @@ def delete_service():
     if not name: return jsonify({'status': 'error', 'message': 'Name missing'}), 400
     
     utils.delete_config_section(f"services:{name}")
-    print(f"[Dashboard] Service profile '{name}' deleted.")
+    utils.log(_LOG_SRC, f"Service profile '{name}' deleted.")
     return jsonify({'status': 'success'})
+
+@app.route('/api/cache/purge', methods=['POST'])
+def purge_cache_api():
+    """Purges the resolved CDN URL cache."""
+    success = utils.purge_cdn_cache()
+    if success:
+        return jsonify({'status': 'success', 'message': 'CDN URL cache purged successfully'})
+    return jsonify({'status': 'error', 'message': 'Failed to purge CDN URL cache'}), 500
+
+@app.route('/api/library/purge', methods=['POST'])
+def purge_library_api():
+    """Resets the indexed playlist library."""
+    success = utils.purge_playlist_library()
+    if success:
+        return jsonify({'status': 'success', 'message': 'Playlist library reset successfully'})
+    return jsonify({'status': 'error', 'message': 'Failed to reset playlist library'}), 500
 
 def start_web_server():
     """Launches the Web UI Flask server in a background thread on configured port."""
+    config = utils.load_config()
     bind_ip = config.get('dashboard', 'dashboard_ip', fallback='0.0.0.0')
     port = config.getint('dashboard', 'dashboard_port', fallback=5001)
     app.run(host=bind_ip, port=port, threaded=True)

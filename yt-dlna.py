@@ -17,58 +17,91 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 import time
-import threading
 import argparse
 import utils
-import sync
-import proxy
-import dlna_server
-import dashboard
+
+_LOG_SRC = "daemon"
 
 def sync_loop():
+    import sync
+
+    time.sleep(5)
+    utils.log(_LOG_SRC, "Sync scheduler active.", "scheduler")
+
     while True:
+        if sync.is_busy():
+            time.sleep(30)
+            continue
+
         config = utils.load_config()
-        interval = config.getint('sync', 'sync_interval', fallback=3600)
-        
-        print("[Daemon] Starting scheduled playlist sync...")
-        try:
-            sync.run_sync()
-        except Exception as e:
-            print(f"[Daemon] Sync loop encountered error: {e}")
-            
-        time.sleep(interval)
+        if not config.getboolean('sync', 'enable_sync', fallback=True):
+            time.sleep(60)
+            continue
+
+        library = utils.get_library() 
+        playlists = utils.get_playlists_config()
+        now = time.time()
+
+        for pl in playlists:
+            if not pl.get('enabled', True):
+                continue
+
+            title = pl['title']
+            is_sync_enabled = pl.get('enable_sync', True)
+            if not is_sync_enabled: continue
+
+            pl_data = library.get(title, {})
+            last_sync = pl_data.get('last_sync', 0) if isinstance(pl_data, dict) else 0
+            interval = int(pl.get('sync_interval', config.getint('sync', 'sync_interval', fallback=3600)))
+
+            if now - last_sync >= interval:
+                utils.log(_LOG_SRC, f"Starting scheduled playlist sync for '{title}'.", "scheduler")
+                try:
+                    sync.run_sync(targets=[title])
+                except Exception as e:
+                    utils.log(_LOG_SRC, f"Sync loop encountered error: {e}", "scheduler", level=1, type='E')
+                time.sleep(5)
+
+        time.sleep(60)
 
 def main():
     parser = argparse.ArgumentParser(
         description="yt-dlna: Lightweight media gateway, proxying streaming playlists to DLNA/UPnP clients",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""examples:
-  yt-dlna --serve                         launch full background daemons and sync scheduler
-  yt-dlna --sync                          perform immediate sync for all playlists and exit
-  yt-dlna --sync "YouTube Watch Later"    sync a specific playlist by name and exit
-  yt-dlna --sync youtube ard              sync all playlists for specific services and exit
-  yt-dlna --version                       display version information and exit
-  yt-dlna --help                          show this help message and exit
+  yt-dlna --serve                launch background daemons and sync scheduler
+  yt-dlna --serve --sync         perform initial sync for all playlists, then serve
+  yt-dlna --serve --verbosity 4  launch background daemons with verbose logging
+  yt-dlna --sync                 perform immediate sync for all playlists and exit
+  yt-dlna --sync "Watch Later"   sync a specific playlist by name and exit
+  yt-dlna --sync youtube ard     sync all playlists for specific services and exit
+  yt-dlna --purge-all            purge both CDN cache and playlist library
+  yt-dlna --version              display version information and exit
+  yt-dlna --help                 show this help message and exit
 """
     )
 
+    parser.add_argument('--verbosity', metavar='LEVEL', type=int, choices=range(0, 6), help='override config verbosity level (0-5)')
     parser.add_argument('-?', '--usage', action='help', help=argparse.SUPPRESS)
     parser.add_argument('--version', '-v', action='version', version=f"yt-dlna v{utils.__version__}")
     
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        '--sync', 
-        nargs='*', 
-        metavar='TARGET', 
-        help='perform immediate sync for all or specific playlists/services and exit'
-    )
-    group.add_argument(
-        '--serve', 
-        action='store_true', 
-        help='launch background proxy, DLNA server, and sync scheduler'
-    )
+    parser.add_argument('--sync', nargs='*', metavar='TARGET', help='perform immediate sync for all or specific playlists/services')
+    parser.add_argument('--serve', action='store_true', help='launch background proxy, DLNA server, and sync scheduler')
+    parser.add_argument('--purge-cache', action='store_true', help='purge all cached CDN streaming URLs (urlcache.json)')
+    parser.add_argument('--purge-library', action='store_true', help='purge all indexed playlist metadata (playlists.json)')
+    parser.add_argument('--purge-all', action='store_true', help='purge both CDN URL cache and playlist library')
     
     args = parser.parse_args()
+
+    has_action = (args.serve or args.sync is not None or args.purge_cache or args.purge_library or args.purge_all)
+
+    # print help if neither a sync, serve or purge argument are given
+    if not has_action:
+        parser.print_help()
+        sys.exit(1)
+
+    if args.verbosity is not None:
+        utils.set_verbosity(args.verbosity)
 
     # first-run auto-initialization of configuration file
     if (args.serve or args.sync is not None) and not os.path.exists(utils.CONFIG_FILE):
@@ -79,24 +112,51 @@ def main():
                     content = f_src.read()
                 with open(utils.CONFIG_FILE, 'wb') as f_dst:
                     f_dst.write(content)
-                print("[Daemon] Created new configuration file yt-dlna.conf from yt-dlna.conf.example.")
+                utils.log(_LOG_SRC, "Created new config file 'yt-dlna.conf' from 'yt-dlna.conf.example'.", "init")
             except Exception as e:
-                print(f"[Daemon] !! Failed to initialize config from example file: {e}")
+                utils.log(_LOG_SRC, f"Failed to initialize config from example file: {e}", "init", level=1, type='E')
         else:
-            print("[Daemon] !! yt-dlna.conf not found, and yt-dlna.conf.example is missing.")
-            print("[Daemon] !! Using defaults, but functionality is likely to be limited.")
+            utils.log(_LOG_SRC, "'yt-dlna.conf' and 'yt-dlna.conf.example' are missing.", "init", level=2, type='W')
+            utils.log(_LOG_SRC, "Using defaults, but functionality is likely limited.", "init", level=2, type='W')
 
-    if args.sync is not None:
-        targets = args.sync
-        if targets:
-            print(f"[CLI] Executing immediate target sync for: {', '.join(targets)}...")
-        else:
-            print("[CLI] Executing immediate library sync for all playlists...")
-            
-        sync.run_sync(targets=targets)
+    # execute purge actions
+    if args.purge_all or args.purge_cache:
+        print("[yt-dlna] Purging CDN URL cache...")
+        utils.purge_cdn_cache()
+
+    if args.purge_all or args.purge_library:
+        print("[yt-dlna] Purging playlist library...")
+        utils.purge_playlist_library()
+
+    # exit after purge if no server or sync arguments given
+    if not args.serve and args.sync is None:
         sys.exit(0)
 
+    # execute immediate/startup sync if requested
+    if args.sync is not None:
+        import sync
+
+        targets = args.sync
+        if targets:
+            print(f"[yt-dlna] Executing immediate target sync for: {', '.join(targets)}...")
+        else:
+            print("[yt-dlna] Executing immediate library sync for all playlists...")
+
+        if args.serve:
+            print("[yt-dlna] --serve: yt-dlna Daemon will start up after sync operation is finished.")
+
+        sync.run_sync(targets=targets)
+        
+        # only exit if we are NOT also starting the server
+        if not args.serve:
+            sys.exit(0)
+
     if args.serve:
+        import threading
+        import proxy
+        import dlna_server
+        import dashboard
+
         print("==================================================")
         print(f"         Starting yt-dlna Daemon v{utils.__version__}       ")
         print("==================================================")
@@ -105,34 +165,34 @@ def main():
 
         proxy_thread = threading.Thread(target=proxy.start_proxy, daemon=True)
         proxy_thread.start()
-        print("[Daemon] Proxy server thread active.")
+        utils.log(_LOG_SRC, "Proxy server thread active.", "init")
 
         dlna_thread = threading.Thread(target=dlna_server.start_dlna, daemon=True)
         dlna_thread.start()
-        print("[Daemon] UPnP/DLNA server active.")
+        utils.log(_LOG_SRC, "UPnP/DLNA server active.", "init")
 
         if config.getboolean('dashboard', 'enable_dashboard', fallback=True):
             dash_port = config.getint('dashboard', 'dashboard_port', fallback=5001)
             web_thread = threading.Thread(target=dashboard.start_web_server, daemon=True)
             web_thread.start()
-            print(f"[Daemon] Web UI administration dashboard active on port {dash_port}.")
+            utils.log(_LOG_SRC, f"Web UI administration dashboard active on port {dash_port}.", "init")
         else:
-            print("[Daemon] Web UI administration dashboard disabled in configuration.")
+            utils.log(_LOG_SRC, "Web UI administration dashboard disabled in configuration.", "init")
 
         if config.getboolean('sync', 'enable_sync', fallback=True):
             sync_thread = threading.Thread(target=sync_loop, daemon=True)
             sync_thread.start()
-            print("[Daemon] Background scheduler thread armed.")
+            utils.log(_LOG_SRC, "Background scheduler thread armed.", "init")
         else:
-            print("[Daemon] Scheduled sync disabled in configuration.")
+            utils.log(_LOG_SRC, "Scheduled sync disabled in configuration.", "init")
 
-        print("[Daemon] yt-dlna initialization complete. Server loop running...")
+        utils.log(_LOG_SRC, "yt-dlna initialization complete. Server loop running...", level=0, type='S')
 
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
-            print("\n[Daemon] Shutdown signal received. Terminating yt-dlna.")
+            print(f"\n[daemon] Shutdown signal received. Terminating yt-dlna.")
 
 if __name__ == '__main__':
     main()

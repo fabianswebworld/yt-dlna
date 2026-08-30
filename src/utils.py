@@ -8,6 +8,7 @@
 # ==============================================================================
 
 import os
+import sys
 import time
 import socket
 import json
@@ -15,8 +16,10 @@ import subprocess
 import configparser
 import threading
 import yt_dlp
+import queue
+from collections import deque
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # step up one level to application root where config and data folders reside
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,9 +30,24 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, 'yt-dlna.conf')
 JSON_PATH = os.path.join(DATA_DIR, 'playlists.json')
 CACHE_PATH = os.path.join(DATA_DIR, 'urlcache.json')
 
-# thread-safe volatile playback statistics counter since daemon boot
+_LIBRARY_CACHE = None
+_LIBRARY_MTIME = 0
+_CONFIG_CACHE = None
+
+_LOG_SRC = __name__
+_LOG_BUFFER = deque(maxlen=1000)
+_LOG_COUNTER = 0
+_LOG_VERBOSITY = None
+_USE_COLOR = ("NO_COLOR" not in os.environ) and (sys.stdout.isatty() or "JOURNAL_STREAM" in os.environ)
+
+# for live logging (SSE) in the web dashboard
+_LISTENERS = []
+
+# thread-safe file locks
 _stats_lock = threading.Lock()
-_cache_file_lock = threading.Lock()
+_cache_file_lock = threading.Lock() # url cache file
+_file_lock = threading.RLock()      # playlists file
+_config_lock = threading.RLock()    # config file
 
 STREAM_STATS = {
     'total_served': 0,
@@ -49,6 +67,11 @@ def xml_escape(text):
             .replace('"', '&quot;')
             .replace("'", '&apos;'))
 
+def short(s, limit=32):
+    """Tiny helper to truncate strings (like URLs) for logs."""
+    s = str(s)
+    return s[:limit] + "..." if len(s) > limit else s
+
 def record_stream_event(event_type):
     """Thread-safely increments playback statistics counters."""
     with _stats_lock:
@@ -56,11 +79,156 @@ def record_stream_event(event_type):
         if event_type in STREAM_STATS:
             STREAM_STATS[event_type] += 1
 
-def load_config():
-    config = configparser.ConfigParser()
-    config.optionxform = str
-    config.read(CONFIG_FILE, encoding='utf-8')
-    return config
+def load_config(force_reload=False):
+    global _CONFIG_CACHE
+    with _config_lock:
+        if _CONFIG_CACHE is None or force_reload:
+            config = configparser.ConfigParser()
+            config.optionxform = str
+            if os.path.exists(CONFIG_FILE):
+                log(_LOG_SRC, f"Loading configuration from {CONFIG_FILE}", "load_config", level=5, type='D')
+                config.read(CONFIG_FILE, encoding='utf-8')
+            else:
+                log("utils", "Configuration file not found, using defaults.", level=2, type='W')
+            _CONFIG_CACHE = config
+        else:
+            log(_LOG_SRC, "Using cached configuration", "load_config", level=5, type='D')
+    return _CONFIG_CACHE
+
+def set_verbosity(val):
+    global _LOG_VERBOSITY
+    _LOG_VERBOSITY = val
+
+def get_verbosity():
+    global _LOG_VERBOSITY
+    if _LOG_VERBOSITY is None:
+        try:
+            conf = load_config()
+            _LOG_VERBOSITY = conf.getint('general', 'verbosity', fallback=3)
+        except Exception:
+            _LOG_VERBOSITY = 3
+    return _LOG_VERBOSITY
+
+def log(source, message, context=None, level=3, type='I'):
+    global _LOG_VERBOSITY, _LOG_COUNTER
+
+    # lazy loading
+    if _LOG_VERBOSITY is None:
+        _LOG_VERBOSITY = 3
+
+        try:
+            conf = load_config()
+            _LOG_VERBOSITY = conf.getint('general', 'verbosity', fallback=3)
+        except Exception:
+            pass
+
+    is_visible = False
+    if level == 0:
+        # 0 is always visible, also in quiet mode
+        is_visible = True
+    elif level > 0:
+        # positive: visible if verbosity is high enough
+        is_visible = (_LOG_VERBOSITY >= level)
+    else:
+        # negative: visible only if verbosity is exactly the absolute value
+        is_visible = (_LOG_VERBOSITY == abs(level))
+
+    if not is_visible:
+        return
+
+    _LOG_COUNTER += 1
+
+    # --- formatted log entry for tty (colored) / journald (plain)
+    label = f"[{source}:{context}]" if context else f"[{source}]"
+    
+    styles = {
+        'E': ('Error: ', '\033[91m'),   # red
+        'W': ('Warning: ', '\033[93m'), # yellow
+        'I': ('', ''),                  # no color
+        'S': ('', '\033[92m'),          # green (success)
+        'D': ('Debug: ', '\033[90m'),   # grey
+    }
+    category, color = styles.get(type, ('', ''))
+
+    colored_line = f"{label} {color}{category}{message}\033[39m"
+
+    if _USE_COLOR:
+        print(colored_line, flush=True)
+    else:
+        print(f"{label} {category}{message}", flush=True)
+
+    # --- structured log entry for web UI / SSE endpoint
+    if not _LISTENERS and len(_LOG_BUFFER) == _LOG_BUFFER.maxlen:
+        # skip if noone is watching the dashboard
+        return 
+
+    entry = {
+        "id": _LOG_COUNTER,
+        "t":  time.time(),
+        "s":  source,
+        "c":  context,
+        "m":  message,
+        "l":  level,
+        "y":  type # 'y' for type (since 't' is taken)
+    }
+    
+    _LOG_BUFFER.append(entry)
+
+    # push log lines to SSE subscribers for live logging in the web UI
+    json_str = json.dumps(entry)
+    for q in _LISTENERS[:]:
+        try:
+            q.put_nowait((_LOG_COUNTER, json_str))
+        except queue.Full:
+            pass 
+
+def get_buffered_logs():
+    return list(_LOG_BUFFER)
+
+def subscribe_logs():
+    """Public API to register a new SSE listener for the logs."""
+    q = queue.Queue(maxsize=1000)
+    _LISTENERS.append(q)
+    return q
+
+def unsubscribe_logs(q):
+    """Public API to remove an SSE listener of the logs."""
+    if q in _LISTENERS:
+        _LISTENERS.remove(q)
+
+def get_library(force_reload=False):
+    """
+    Returns the playlists library from RAM.
+    Only reads from disk if cache is empty, force_reload is True, or if
+    file was externally modified.
+    """
+    global _LIBRARY_CACHE, _LIBRARY_MTIME
+    with _file_lock:
+        current_mtime = os.path.getmtime(JSON_PATH) if os.path.exists(JSON_PATH) else 0
+
+        # reload if cache is empty, if forced, or if file modified on disk by another process
+        if _LIBRARY_CACHE is None or force_reload or (current_mtime > _LIBRARY_MTIME):
+            if os.path.exists(JSON_PATH):
+                try:
+                    with open(JSON_PATH, 'r', encoding='utf-8') as f:
+                        _LIBRARY_CACHE = json.load(f)
+                    _LIBRARY_MTIME = current_mtime
+                except Exception as e:
+                    log("utils", f"Error reading library: {e}", context="cache", level=1, type='E')
+                    _LIBRARY_CACHE = {}
+            else:
+                _LIBRARY_CACHE = {}
+                _LIBRARY_MTIME = 0
+                
+    return _LIBRARY_CACHE
+
+def get_cache_count():
+    if os.path.exists(CACHE_PATH):
+        try:
+            with open(CACHE_PATH, 'r', encoding='utf-8') as f:
+                return len(json.load(f))
+        except: pass
+    return 0
 
 def _update_config_file(updates_dict):
     """
@@ -84,10 +252,18 @@ def _update_config_file(updates_dict):
         if stripped.startswith('[') and stripped.endswith(']'):
             # before leaving previous section, add missing (new) keys
             if current_section in updates_dict:
+                trailing_blanks = []
+                while new_lines and not new_lines[-1].strip():
+                    trailing_blanks.append(new_lines.pop())
+                
+                # append new keys
                 for k, v in updates_dict[current_section].items():
-                    # only add if key was never seen AND not marked for deletion
                     if k not in seen_keys and v is not None:
                         new_lines.append(f"{k} = {v}\n")
+                
+                # restore the trailing blank lines (preserving section spacing)
+                while trailing_blanks:
+                    new_lines.append(trailing_blanks.pop())
             
             current_section = stripped[1:-1].strip()
             processed_sections.add(current_section)
@@ -115,21 +291,29 @@ def _update_config_file(updates_dict):
 
     # handle end of file for the last section
     if current_section in updates_dict:
+        trailing_blanks = []
+        while new_lines and not new_lines[-1].strip():
+            trailing_blanks.append(new_lines.pop())
+
         for k, v in updates_dict[current_section].items():
             if k not in seen_keys and v is not None:
                 new_lines.append(f"{k} = {v}\n")
+
+        while trailing_blanks:
+            new_lines.append(trailing_blanks.pop())
 
     # add new sections
     for sec_name, key_dict in updates_dict.items():
         if sec_name not in processed_sections:
             new_lines.append(f"\n[{sec_name}]\n")
             for k, v in key_dict.items():
-                if v is not None: # Don't create a section just to delete a key
+                if v is not None:
                     new_lines.append(f"{k} = {v}\n")
 
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
-    load_config()
+
+    load_config(force_reload=True)
 
 def update_config_from_dict(parsed_data):
     """Updates the config using a nested dictionary structure."""
@@ -137,7 +321,6 @@ def update_config_from_dict(parsed_data):
     for sec, keys in parsed_data.items():
         if isinstance(keys, dict):
             updates[sec] = {k: (str(v) if v is not None else None) for k, v in keys.items()}
-    
     _update_config_file(updates)
 
 def update_config_single_key(section, key, value):
@@ -172,7 +355,7 @@ def rename_config_section(old_section, new_section):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
     
-    load_config()
+    load_config(force_reload=True)
 
 def reorder_config_sections(section_prefix, new_order_names):
     """
@@ -253,7 +436,7 @@ def reorder_config_sections(section_prefix, new_order_names):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
 
-    load_config()
+    load_config(force_reload=True)
 
 def delete_config_section(section_name):
     """Removes a section and its keys from the INI, preserving all other sections and comments."""
@@ -283,7 +466,7 @@ def delete_config_section(section_name):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         f.writelines(new_lines)
     
-    load_config()
+    load_config(force_reload=True)
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -444,15 +627,15 @@ def get_playlists_config():
 
 def get_custom_playlists_registry():
     """Returns a list of custom playlist definitions from yt-dlna.conf."""
-    cfg = load_config()
+    config = load_config()
     registry = []
-    for section in cfg.sections():
+    for section in config.sections():
         if section.startswith('custom_playlists:'):
             name = section.replace('custom_playlists:', '').strip()
             registry.append({
                 'name': name,
-                'enabled': cfg.getboolean(section, 'enabled', fallback=True),
-                'file': cfg.get(section, 'playlist_file', fallback='').strip()
+                'enabled': config.getboolean(section, 'enabled', fallback=True),
+                'file': config.get(section, 'playlist_file', fallback='').strip()
             })
     return registry
 
@@ -549,12 +732,7 @@ def set_cached_url(video_id, entry_data, service_name='youtube'):
 
         cache[video_id] = cache_entry
 
-        os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-        try:
-            with open(CACHE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(cache, f, indent=2)
-        except Exception as e:
-            print(f"[Cache] Error writing cache file: {e}")
+        replace_save_json(CACHE_PATH, cache, indent=2)
 
 def invalidate_cached_url(video_id):
     if not os.path.exists(CACHE_PATH):
@@ -565,10 +743,48 @@ def invalidate_cached_url(video_id):
                 cache = json.load(f)
             if video_id in cache:
                 del cache[video_id]
-                with open(CACHE_PATH, 'w', encoding='utf-8') as f:
-                    json.dump(cache, f, indent=2)
+                replace_save_json(CACHE_PATH, cache, indent=2)
         except Exception:
             pass
+
+def purge_cdn_cache():
+    """Purges CDN URL cache and wipes urlcache.json."""
+    with _cache_file_lock:
+        success = replace_save_json(CACHE_PATH, {}, indent=2)
+        if not success:
+            return False
+    log(_LOG_SRC, "CDN URL cache purged successfully.", "cache", type='S')
+    return True
+
+def purge_playlist_library():
+    """Purges playlist library and wipes playlists.json."""
+    global _LIBRARY_CACHE, _LIBRARY_MTIME
+    with _file_lock:
+        success = replace_save_json(JSON_PATH, {}, indent=4)
+        if not success:
+            return False
+        _LIBRARY_CACHE = {}
+        _LIBRARY_MTIME = os.path.getmtime(JSON_PATH) if os.path.exists(JSON_PATH) else 0
+
+    log(_LOG_SRC, "Playlist library purged successfully.", "library", type='S')
+    return True
+
+def replace_save_json(file_path, data, indent=4):
+    tmp_path = f"{file_path}.tmp"
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=indent, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, file_path)
+        return True
+    except Exception as e:
+        log("utils", f"Save failed for {file_path}: {e}", level=1, type='E')
+        if os.path.exists(tmp_path):
+            try: os.remove(tmp_path)
+            except: pass
+        return False
 
 # --- yt-dlp extraction helper ---
 
@@ -595,8 +811,8 @@ def extract_youtube_info(url, extra_opts=None, use_cookies=True, cookie_path=Non
             ydl_opts.update(extra_opts)
 
         # --- debug output ---
-        # print(f"[yt-dlp] yt-dlp module call for: {url}")
-        # print(f"[yt-dlp] Effective Options: {ydl_opts}")
+        log(_LOG_SRC, f"yt-dlp module call for: {url}", "yt-dlp", level=5, type='D')
+        log(_LOG_SRC, f"Effective options: {ydl_opts}", "yt-dlp", level=5, type='D')
             
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             if isinstance(url, list):
@@ -605,7 +821,8 @@ def extract_youtube_info(url, extra_opts=None, use_cookies=True, cookie_path=Non
                     try:
                         results.append(ydl.extract_info(u, download=False))
                     except Exception as e:
-                        print(f"[Cache] Batch item extraction failed for {u}: {e}")
+                        log(_LOG_SRC, f"Batch item extraction failed for {u}: {e}", "yt-dlp", level=1, type='E')
+                        results.append(None)
                 return results
             else:
                 return ydl.extract_info(url, download=False)
@@ -649,9 +866,9 @@ def extract_youtube_info(url, extra_opts=None, use_cookies=True, cookie_path=Non
                         cmd.extend(['--extractor-args', f"{extractor}:{';'.join(arg_strings)}"])
 
         # --- debug output ---
-        # print(f"[yt-dlp] CLI call command: {' '.join(cmd)}")
-        # if stdin_input:
-        #    print(f"[yt-dlp] CLI stdin (batch): {stdin_input[:200]}...")
+        log(_LOG_SRC, f"Calling command: {' '.join(cmd)}", "yt-dlp", level=5, type='D')
+        if stdin_input:
+            log(_LOG_SRC, f"CLI stdin (batch): {stdin_input[:200]}...", "yt-dlp", level=5, type='D')
             
         result = subprocess.run(
             cmd, 

@@ -3,6 +3,16 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# --- [general] general settings ---
+# -----------------------------------------------------------------------------
+
+[general]
+# logging verbosity
+# 0: quiet, 1: errors, 2: warnings, 3: info (default), 4: verbose, 5: debug
+verbosity = 3
+
+
+# -----------------------------------------------------------------------------
 # --- [proxy] HTTP proxy settings ---
 # -----------------------------------------------------------------------------
 
@@ -29,6 +39,12 @@ proxy_url_pattern_proxy = /proxy/{service}/{video_id}
 
 # will enforce remux mode, fallback to proxy mode if no DASH stream
 proxy_url_pattern_remux = /remux/{service}/{video_id}
+
+# will enforce remux mode like above and force MP4 output
+proxy_url_pattern_remux_mp4 = /remux/mp4/{service}/{video_id}
+
+# will enforce remux mode like above and force MPEG-TS output
+proxy_url_pattern_remux_ts = /remux/ts/{service}/{video_id}
 
 # the following two routes will skip any yt-dlp CDN URL resolving,
 # and are used for Custom Playlists with known, static target URLs,
@@ -232,6 +248,17 @@ sort_by = none
 #                     unlimited if set to 0 (note: 'YouTube Liked Videos' etc.
 #                     can get very large, so remember to set limit_items!)
 #   sort_by           override sorting order for this specific playlist
+#   enabled           enable or disable a playlist; disabling a playlist will
+#                     completely hide it from UPnP listings and exclude it from
+#                     the automatic sync scheduler (default is yes)
+#   enable_sync       if set to no, the playlist is excluded from auto sync
+#                     (default is yes); note that this setting is NOT inherited
+#                     from the enable_sync setting in the [sync] section; the
+#                     latter one merely acts as a global enable/disable switch
+#                     for the scheduler itself
+#   sync_interval     set an individual sync interval for this playlist in the
+#                     sync scheduler; if not set, this IS inherited from the
+#                     sync_interval setting in the [sync] section
 
 [playlists:YouTube Watch Later]
 url = WL

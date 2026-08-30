@@ -48,7 +48,7 @@ To accomplish the "heavy lifting", such as extracting playlists and CDN URLs (an
 
 In short, these are the core components which go hand in hand to accomplish the task to present your online video playlists as DLNA views on your TV:
 
-1. **Sync Engine (`sync.py`):** Periodically indexes configured playlists using `yt-dlp`, extracting raw metadata (titles, channels, durations) and pre-caching direct CDN URLs.
+1. **Sync Engine (`sync.py`):** Periodically indexes configured playlists using `yt-dlp`, extracting raw metadata (titles, channels, durations) and optionally pre-caching direct CDN URLs.
 2. **DLNA Engine (`dlna_server.py`):** Broadcasts SSDP discovery beacons and serves a virtual folder tree to your TV via UPnP.
 3. **Proxy Engine (`proxy.py`):** Receives play requests from your TV and instantly issues HTTP 302 redirects (or streams bytes) directly to the media CDN.
 4. **Dashboard Webserver (`dashboard.py`):** This is completely optional and serves the Web UI on port 5001 by default; it can be disabled if desired.
@@ -120,14 +120,15 @@ If your Smart TV refuses to play the videos on your first attempt, fear not, and
 
 `yt-dlna.conf` is fully documented with in-line comments. It is divided into the following main sections:
 
-- **`[proxy]`**: Controls HTTP bind IP/port, proxying mode (`redirect` vs `proxy`), and CDN URL caching parameters.
+- **`[general]`**: General settings like log verbosity.
+- **`[proxy]`**: Controls HTTP bind IP/port, proxying mode (`redirect` vs `proxy`), customized proxy routes, and CDN URL caching parameters.
 - **`[dlna]`**: Controls UPnP server name, bind parameters, and icon paths.
 - **`[dashboard]`**: Configures the Dashboard Web UI.
 - **`[sync]`**: Controls automatic sync intervals and proactive CDN URL pre-caching.
 - **`[yt-dlp]`**: Configures how to load, and where to find, `yt-dlp` (via import, or as an external binary)
 - **`[ffmpeg]`**: Configures and where to find `ffmpeg` (required only for remuxing) and which custom extra options to pass to it
 - **`[services:...]`**: Configures individual streaming extractors, format selectors, title templates, and cookie paths.
-- **`[playlists:...]`**: Defines the source playlists (online playlists) which are then served as virtual DLNA folders to your clients (target URLs, item limits, sort criteria).
+- **`[playlists:...]`**: Defines the source playlists (online playlists) which are then served as virtual DLNA folders to your clients (target URLs, item limits, sort criteria, individual sync intervals etc.).
 - **`[custom_playlists:...]`**: Defines custom, locally-curated, hierarchical playlists (JSON files) that can be edited by you at any time and may be used e.g. as a "bookmarks" folder for your favorite radio streaming URLs.
 
 If you want to configure manually, please read the in-line documentation.
@@ -152,6 +153,73 @@ Additionally, here's some especially neat things about certain configuration com
 
 - If you create multiple services that all use the same extractor (e.g., 'youtube'), but different `cookie_path` options, you can use multiple accounts, e.g. multiple users' "Watch Later" playlists.
 - If you do not specify any playlist and set `enable_sync = no` in the `[sync]` section, you can effectively use **yt-dlna** as just a `yt-dlp`-powered stream proxy, enabling you to watch YouTube or other online videos on any device on your network by just opening e.g. `http://yt-dlna-host:5000/play/youtube/{video_id}` in the player or browser of your choice (it will take some seconds if that video has never been played before, though - but afterwards, it will be available until the CDN URL expires, which is usually 6 hours for YouTube).
+
+## Usage & CLI Commands
+
+```text
+usage: yt-dlna.py [-h] [--verbosity LEVEL] [--version] [--sync [TARGET ...]] [--serve]
+                  [--purge-cache] [--purge-library] [--purge-all]
+
+yt-dlna: Lightweight media gateway, proxying streaming playlists to DLNA/UPnP clients
+
+options:
+  -h, --help           show this help message and exit
+  --verbosity LEVEL    override config verbosity level (0-5)
+  --version, -v        show program's version number and exit
+  --sync [TARGET ...]  perform immediate sync for all or specific playlists/services
+  --serve              launch background proxy, DLNA server, and sync scheduler
+  --purge-cache        purge all cached CDN streaming URLs (urlcache.json)
+  --purge-library      purge all indexed playlist metadata (playlists.json)
+  --purge-all          purge both CDN URL cache and playlist library
+
+examples:
+  yt-dlna --serve                launch background daemons and sync scheduler
+  yt-dlna --serve --sync         perform initial sync for all playlists, then serve
+  yt-dlna --serve --verbosity 4  launch background daemons with verbose logging
+  yt-dlna --sync                 perform immediate sync for all playlists and exit
+  yt-dlna --sync "Watch Later"   sync a specific playlist by name and exit
+  yt-dlna --sync youtube ard     sync all playlists for specific services and exit
+  yt-dlna --purge-all            purge both CDN cache and playlist library
+  yt-dlna --version              display version information and exit
+  yt-dlna --help                 show this help message and exit
+```
+
+## Running as a systemd Service
+
+To run **yt-dlna** automatically in the background at boot on Linux:
+
+1. Create a service file `/etc/systemd/system/yt-dlna.service` (it is also included in the root of the repository); adapt the paths to suit your installation (the example shows a typical installation on Raspberry Pi, but maybe you want to e.g. use a different python3 binary):
+
+   ```ini
+   [Unit]
+   Description=yt-dlna Media Server Daemon
+   After=network.target
+   
+   [Service]
+   Type=simple
+   User=pi
+   WorkingDirectory=/home/pi/yt-dlna
+   ExecStart=/usr/bin/python3 /home/pi/yt-dlna/yt-dlna.py --serve
+   Environment=PYTHONUNBUFFERED=1
+   Restart=on-failure
+   RestartSec=5
+   StandardOutput=journal
+   StandardError=journal
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+2. Enable and start the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable yt-dlna
+   sudo systemctl start yt-dlna
+   ```
+
+3. View live logs via `journalctl`:
+   ```bash
+   journalctl -u yt-dlna -f
+   ```
 
 ## About the remultiplexing mode (``enable_remux``)
 
@@ -196,68 +264,31 @@ The home automation system could, for example, regularly update and store readin
 
 An example implementation of a helper module for the _FHEM_ home automation system (98_ytdlnaCustomPlaylistFrontend.pm), to enable dynamic generation of such "interactive" Custom Playlist files, is available in [this separate repository](https://github.com/fabianswebworld/fhem-yt-dlna-custom-playlist-frontend).
 
-## Usage & CLI Commands
+## About the sync scheduler
 
-```text
-usage: yt-dlna.py [-h] [--version] (--sync [TARGET ...] | --serve)
+With **yt-dlna** version 1.2.0, the sync scheduler has been completely reworked and now supports different sync invervals for individual playlists, and allows for excluding individual playlists from scheduled sync altogether.
 
-yt-dlna: Lightweight media gateway, proxying streaming playlists to DLNA/UPnP clients
+The old scheduler only had one single sync interval, and this started always at the point the daemon was started. So, when reloading the daemon several times (when maybe experementing with different settings), each time a complete sync run was triggered. Also, the fact that one sync run always synced all playlists, this meant a long CPU spike at regular intervals on slower hardware.
 
-options:
-  -h, --help           show this help message and exit
-  --version, -v        show program's version number and exit
-  --sync [TARGET ...]  perform immediate sync for all or specific playlists/services and exit
-  --serve              launch background proxy, DLNA server, and sync scheduler
+The new scheduler avoids this, by letting you set playlists that do not frequently change to a higher sync interval. Moreover, it persistently stores the last sync time for each playlist, so that if you stop the daemon and restart it later, it will only catch up sync for those playlists where it is necessary, instead of triggering a full sync run even after a short interruption of the service (e.g. daemon restart or system reboot).
 
-examples:
-  yt-dlna --serve                         launch full background daemons and sync scheduler
-  yt-dlna --sync                          perform immediate sync for all playlists and exit
-  yt-dlna --sync "YouTube Watch Later"    sync a specific playlist by name and exit
-  yt-dlna --sync youtube ard              sync all playlists for specific services and exit
-  yt-dlna --version                       display version information and exit
-  yt-dlna --help                          show this help message and exit
-```
+However, this has a few implications in comparison to the old sync scheduler: Even if several (or all) playlists use the same interval, it will not mean that they will sync at the same time. Instead, due to the duration of the individual sync operations, the sync times can get scattered over time, especially when running the daemon over a very long period of time.
 
-## Running as a systemd Service
+Only if you trigger a "Sync all Online Playlists" action from the Web UI (or via `yt-dlna.py --sync`), those schedule times will be aligned again.
 
-To run **yt-dlna** automatically in the background at boot on Linux:
+If you prefer a behavior that (almost) matches the old scheduler's behavior, you can choose to include the `--sync` argument together with the `--sync` argument in your service file, which is now supported.
 
-1. Create a service file `/etc/systemd/system/yt-dlna.service` (it is also included in the root of the repository); adapt the paths to suit your installation (the example shows a typical installation on Raspberry Pi, but maybe you want to e.g. use a different python3 binary):
+Moreover, due to a rework of the JSON save operations, it is now possible to issue `--sync` commands as separate processes while the daemon is running without any risk of file corruption. This means that you could even create your own, complex sync schedule using cronjobs.
 
-   ```ini
-   [Unit]
-   Description=yt-dlna Media Server Daemon
-   After=network.target
-   
-   [Service]
-   Type=simple
-   User=pi
-   WorkingDirectory=/home/pi/yt-dlna
-   ExecStart=/usr/bin/python3 /home/pi/yt-dlna/yt-dlna.py --serve
-   Environment=PYTHONUNBUFFERED=1
-   Restart=on-failure
-   RestartSec=5
-   StandardOutput=journal
-   StandardError=journal
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-2. Enable and start the service:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable yt-dlna
-   sudo systemctl start yt-dlna
-   ```
+Especially for playlists that update only seldomly, but always at a fixed day of week on a specific time (e.g. weekly episodes on a TV show), this is the way better approach than setting the sync interval to 604800 (1 week) for those playlists, because depending on when you started the daemon, this can mean that the playlist is updated weekly, but on a different day than the new episode is released, meaning you will not have the new episode available when you need it. 
 
-3. View live logs via `journalctl`:
-   ```bash
-   journalctl -u yt-dlna -f
-   ```
+A simple cronjob configured to run e.g. every Wednesday at 19:00, when the episode usually is released, and which runs `/usr/bin/python3 /home/pi/yt-dlna/yt-dlna.py --sync "My TV Show"` is the ideal solution for this.
+
+If you want to use this approach, it is recommended to disable **yt-dlna**'s own sync scheduler altogether.
 
 ---
 
-## Deep dive: The inner workings
+## The inner workings
 
 ### Metadata and content data flow
 

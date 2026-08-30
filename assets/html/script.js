@@ -6,7 +6,7 @@
 let parsedConfigData = {};
 let pendingDeletion = { type: null, id: null };
 let initialSyncSchedulerState = null;
-let playlistCounts = {};
+let playlistStatusMap = {}; 
 let draggedElement = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -40,6 +40,8 @@ function initDashboard() {
     document.getElementById('btn-reload-config').addEventListener('click', reloadConfig);
     document.getElementById('btn-save-config').addEventListener('click', saveRawConfig);
     document.getElementById('settings-form').addEventListener('submit', saveParsedSettings);
+    document.getElementById('btn-purge-cache')?.addEventListener('click', purgeCdnUrlCache);
+    document.getElementById('btn-purge-library')?.addEventListener('click', purgePlaylistLibrary);
 
     document.querySelectorAll('.sub-tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -223,13 +225,18 @@ function showToast(message, isError = false) {
     }, 4000);
 }
 
-function updatePlaylistCardCounts() {
-    const countSpans = document.querySelectorAll('.playlist-count[data-pl-title]');
-    countSpans.forEach(span => {
-        const title = span.getAttribute('data-pl-title');
-        if (playlistCounts[title] !== undefined) {
-            span.textContent = `(${playlistCounts[title]} items)`;
-        }
+function updatePlaylistCardStatus() {
+    Object.keys(playlistStatusMap).forEach(title => {
+        const status = playlistStatusMap[title];
+        
+        const countEl = document.querySelector(`[data-pl-title="${title}"]`);
+        if (countEl) countEl.innerText = `${status.count}`;
+
+        const syncEl = document.querySelector(`[data-pl-sync="${title}"]`);
+        if (syncEl) syncEl.innerText = formatLastSync(status.lastSync);
+        
+        const srvEl = document.querySelector(`[data-pl-srv-label="${title}"]`);
+        if (srvEl) srvEl.innerText = status.service;
     });
 }
 
@@ -256,11 +263,9 @@ async function fetchStatus() {
     try {
         const res = await fetch('/api/status', { signal: controller.signal });
         clearTimeout(timeoutId);
-        
         const data = await res.json();
 
         document.getElementById('version-badge').textContent = `v${data.version}`;
-        document.getElementById('server-status').textContent = data.status;
         document.getElementById('local-ip').textContent = data.local_ip;
         document.getElementById('dlna-port').textContent = data.dlna_port;
         document.getElementById('proxy-port').textContent = data.proxy_port;
@@ -273,7 +278,7 @@ async function fetchStatus() {
         let totalSum = 0;
         if (data.playlists) {
             data.playlists.forEach(pl => {
-                playlistCounts[pl.title] = pl.count;
+                playlistStatusMap[pl.title] = pl;
                 totalSum += pl.count;
             });
         }
@@ -281,7 +286,7 @@ async function fetchStatus() {
         const totalTile = document.getElementById('stat-indexed-items');
         if (totalTile) totalTile.textContent = totalSum;
 
-        updatePlaylistCardCounts();
+        updatePlaylistCardStatus();
 
         if (data.stats) {
             document.getElementById('stat-total').textContent = data.stats.total_served || 0;
@@ -440,15 +445,27 @@ function openDeleteModal(type, id) {
     pendingDeletion = { type, id };
     const titleEl = document.getElementById('modal-delete-title');
     const descEl = document.getElementById('modal-delete-desc');
+    const confirmBtn = document.getElementById('btn-confirm-delete');
     
     if (type === 'playlist') {
         titleEl.textContent = 'Delete playlist';
         descEl.textContent = `Are you sure you want to delete the playlist '${id}'?`;
+        if (confirmBtn) confirmBtn.textContent = 'Yes, delete playlist';
     } else if (type === 'service') {
         const serviceName = id.replace('services:', '');
         titleEl.textContent = 'Delete service';
         descEl.textContent = `Are you sure you want to delete the service profile '${serviceName}'?`;
+        if (confirmBtn) confirmBtn.textContent = 'Yes, delete service';
+    } else if (type === 'library') {
+        titleEl.textContent = 'Reset playlist library';
+        descEl.innerHTML = '<strong>Are you sure you want to reset the playlist library?</strong><br /><br />The library of indexed playlist entries will be purged, and it will be regenerated automatically on next playlist sync.';
+        if (confirmBtn) confirmBtn.textContent = 'Yes, reset library';
+    } else if (type === 'urlcache') {
+        titleEl.textContent = 'Purge CDN URL cache';
+        descEl.innerHTML = '<strong>Are you sure you want to purge the CDN URL cache?</strong><br /><br />All CDN URLs will have to be re-resolved. This will happen automatically on next playback, or on playlist sync if the <i>Proactively pre-cache CDN URLs during sync</i> setting is enabled on the Settings tab.';
+        if (confirmBtn) confirmBtn.textContent = 'Yes, purge cache';
     }
+    
     document.getElementById('modal-delete').classList.remove('hidden');
 }
 
@@ -460,6 +477,10 @@ async function confirmDeletion() {
         await deleteService(id);
     } else if (type === 'custom') {
         await deleteCustomPlaylist(id);
+    } else if (type === 'library') {
+        await executePurgeLibrary();
+    } else if (type === 'urlcache') {
+        await executePurgeCdnUrlCache();
     }
     document.getElementById('modal-delete').classList.add('hidden');
     pendingDeletion = { type: null, id: null };
@@ -573,7 +594,11 @@ function renderPlaylistsTab(configData) {
         container.innerHTML = '<p class="placeholder">No active playlists configured.</p>';
         return;
     }
+
     const globalOpts = configData['playlists'] || {};
+    const globalSync = configData['sync'] || {};
+    const isGloballySyncEnabled = (globalSync.enable_sync !== 'no');
+    
     const serviceOptions = ['youtube'];
     Object.keys(configData).forEach(sec => {
         if (sec.startsWith('services:')) serviceOptions.push(sec.replace('services:', ''));
@@ -628,19 +653,34 @@ function renderPlaylistsTab(configData) {
         const opts = configData[sec] || {};
         const isEnabled = opts.enabled !== 'no';
         const viewUrl = `/playlist/${encodeURIComponent(title)}`;
-        const count = playlistCounts[title] !== undefined ? playlistCounts[title] : '?';
+        
+        const status = (typeof playlistStatusMap !== 'undefined' && playlistStatusMap[title]) || {};
+        const count = status.count !== undefined ? status.count : '?';
+        const service = status.service || opts.service || globalOpts.default_service || 'youtube';
+        const lastSyncStr = formatLastSync(status.lastSync);
+
+        const isPlaylistSyncEnabled = (opts.enable_sync !== 'no' && opts.enable_sync !== 'off');
 
         const hasSrvOverride = isOverridden(sec, 'service');
         const hasLimitOverride = isOverridden(sec, 'limit_items');
         const hasSortOverride = isOverridden(sec, 'sort_by');
+        const hasSyncIntOverride = isOverridden(sec, 'sync_interval');
+
+        const effectiveInterval = hasSyncIntOverride ? opts.sync_interval : (globalSync.sync_interval || 3600);
 
         return `
             <div class="playlist-card collapsed ${isEnabled ? '' : 'disabled-card'}" id="playlist-card-${escapeJs(title)}" ondragover="handleDragOver(event)">
                 <div class="playlist-card-header">
                     <div class="playlist-title-group" onclick="togglePlaylistCard(this)">
                         <span class="chevron">▲</span>
-                        <span class="playlist-title">${escapeHtml(title)}</span>
-                        <span class="playlist-count" data-pl-title="${escapeHtml(title)}">(${count} items)</span>
+                        <div class="playlist-info-wrapper">
+                            <span class="playlist-title">${escapeHtml(title)}</span>
+                            <div class="playlist-meta-line">
+                                <span class="meta-item">Service: <strong data-pl-srv-label="${escapeHtml(title)}">${service}</strong></span>
+                                <span class="meta-item">Items: <strong data-pl-title="${escapeHtml(title)}">${count}</strong></span>
+                                <span class="meta-item">Last sync: <strong data-pl-sync="${escapeHtml(title)}">${lastSyncStr}</strong></span>
+                            </div>
+                        </div>
                     </div>
                     <div class="header-controls">
                         <label class="switch switch-small" title="Enable/disable playlist">
@@ -649,8 +689,8 @@ function renderPlaylistsTab(configData) {
                         </label>
                         <div class="actions">
                             <a href="${viewUrl}" class="btn primary btn-small btn-view ${isEnabled ? '' : 'disabled'}" ${isEnabled ? '' : 'tabindex="-1" aria-disabled="true"'}>View</a>
-                            <button class="btn secondary btn-small btn-sync" onclick="triggerSync('${escapeJs(title)}')" ${isEnabled ? '' : 'disabled'}>Sync</button>
-                            <button class="btn danger btn-small btn-delete" onclick="openDeleteModal('playlist', '${escapeJs(title)}')" title="Delete" aria-label="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+                            <button class="btn secondary btn-small btn-sync" onclick="triggerSync('${escapeJs(title)}')" ${isEnabled ? '' : 'disabled'} title="Sync" aria-label="Sync"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; padding-bottom: 2px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+                            <button class="btn danger btn-small btn-delete" onclick="openDeleteModal('playlist', '${escapeJs(title)}')" title="Delete" aria-label="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; padding-bottom: 2px;"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
                         </div>
                     </div>
                     <div class="drag-handle" draggable="true" ondragstart="handleDragStart(event)" ondragend="handleDragEnd(event)">⋮⋮</div>
@@ -682,14 +722,14 @@ function renderPlaylistsTab(configData) {
                                 <div class="field-row ${hasLimitOverride ? '' : 'disabled'}">
                                     <input type="checkbox" class="override-checkbox" onchange="toggleOverride(this)" ${hasLimitOverride ? 'checked' : ''}>
                                     <div class="field-content form-group">
-                                        <label>Item Limit</label>
+                                        <label>Individual item Limit</label>
                                         <input type="number" id="pl-limit-${escapeJs(title)}" value="${hasLimitOverride ? opts.limit_items : globalOpts.limit_items}" min="0" oninput="markCardDirty(this.closest('.playlist-card'))" ${hasLimitOverride ? '' : 'disabled'}>
                                     </div>
                                 </div>
                                 <div class="field-row ${hasSortOverride ? '' : 'disabled'}">
                                     <input type="checkbox" class="override-checkbox" onchange="toggleOverride(this)" ${hasSortOverride ? 'checked' : ''}>
                                     <div class="field-content form-group">
-                                        <label>Sorting order</label>
+                                        <label>Individual sorting order</label>
                                         <select id="pl-sort-${escapeJs(title)}" oninput="markCardDirty(this.closest('.playlist-card'))" ${hasSortOverride ? '' : 'disabled'}>
                                             <option value="none" ${ (hasSortOverride ? opts.sort_by : globalOpts.sort_by) === 'none' ? 'selected' : ''}>none</option>
                                             <option value="reverse" ${ (hasSortOverride ? opts.sort_by : globalOpts.sort_by) === 'reverse' ? 'selected' : ''}>reverse</option>
@@ -700,6 +740,38 @@ function renderPlaylistsTab(configData) {
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="switch-container ${isGloballySyncEnabled ? '' : 'disabled'}" style="${isGloballySyncEnabled ? '' : 'opacity: 0.5;'}">
+                                <span class="switch-label">
+                                    Include playlist in auto-sync
+                                    ${isGloballySyncEnabled ? '' : '<small style="color: var(--accent-yellow); display: block; font-size: 0.75rem;">(Sync scheduler disabled in Settings)</small>'}
+                                </span>
+                                <label class="switch" title="${isGloballySyncEnabled ? 'Toggle auto-sync for this playlist' : 'Sync scheduler disabled in Settings'}">
+                                    <input type="checkbox" 
+                                           id="pl-sync-en-${escapeJs(title)}" 
+                                           ${isPlaylistSyncEnabled ? 'checked' : ''} 
+                                           ${isGloballySyncEnabled ? '' : 'disabled'}
+                                           onchange="markCardDirty(this.closest('.playlist-card'))">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="field-row ${hasSyncIntOverride ? '' : 'disabled'}" style="margin-top: 12px;">
+                                <input type="checkbox" 
+                                       class="override-checkbox" 
+                                       onchange="toggleOverride(this)" 
+                                       ${hasSyncIntOverride ? 'checked' : ''}>
+                                <div class="field-content form-group">
+                                    <label>Individual sync interval (seconds)</label>
+                                    <input type="number" 
+                                           id="pl-sync-int-${escapeJs(title)}" 
+                                           value="${effectiveInterval}" 
+                                           min="60" 
+                                           ${hasSyncIntOverride ? '' : 'disabled'}
+                                           oninput="markCardDirty(this.closest('.playlist-card'))">
+                                </div>
+                            </div>
+
                         </div>
                         <div class="actions margin-top" style="justify-content: flex-end;">
                             <button class="btn primary btn-small btn-save-card" disabled onclick="savePlaylistCard('${escapeJs(title)}')">Save Changes</button>
@@ -884,6 +956,9 @@ function getGlobalValue(sectionType, key) {
     if (sectionType === 'services' && key === 'cache_ttl') {
         return (parsedConfigData['proxy'] && parsedConfigData['proxy']['default_cache_ttl']) || "14400";
     }
+    if (sectionType === 'playlists' && key === 'sync_interval') {
+        return (parsedConfigData['sync'] && parsedConfigData['sync']['sync_interval']) || "3600";
+    }
     return (parsedConfigData[sectionType] && parsedConfigData[sectionType][key]) || "";
 }
 
@@ -910,6 +985,11 @@ async function savePlaylistCard(oldTitle) {
     collectField(updateData, `pl-srv-${oldTitle}`, 'service', false);
     collectField(updateData, `pl-limit-${oldTitle}`, 'limit_items', false);
     collectField(updateData, `pl-sort-${oldTitle}`, 'sort_by', false);
+    collectField(updateData, `pl-sync-int-${oldTitle}`, 'sync_interval', false);
+    const syncEnInput = document.getElementById(`pl-sync-en-${oldTitle}`);
+    if (syncEnInput) {
+        updateData['enable_sync'] = syncEnInput.checked ? 'yes' : 'no';
+    }
 
     updateData['enabled'] = parsedConfigData[`playlists:${oldTitle}`]?.enabled || 'yes';
     parsedConfigData[currentSec] = updateData;
@@ -1126,6 +1206,7 @@ function renderSettingsForm(configData) {
     const container = document.getElementById('settings-form-container');
     if (!container) return;
 
+    const general = configData.general || {}; // New [general] section
     const proxy = configData.proxy || {};
     const dlna = configData.dlna || {};
     const syncCfg = configData.sync || {};
@@ -1137,19 +1218,30 @@ function renderSettingsForm(configData) {
 
     container.innerHTML = `
         <div class="card">
+            <h3>General settings</h3>
+            <div class="form-stack">
+                <div class="form-group">
+                    <label>Log verbosity level (0: Quiet, 1: Error, 2: Warning, 3: Info <i>[default]</i>, 4: Verbose, 5: Debug)</label>
+                    <input type="number" name="general.verbosity" min="0" max="5" value="${general.verbosity || 3}">
+                </div>
+            </div>
+        </div>
+
+        <div class="card margin-top">
             <h3>Proxy settings</h3>
             <div class="form-stack">
                 <div class="form-group">
-                    <label>Proxy Bind IP (0.0.0.0 = default)</label>
+                    <label>Proxy bind IP (0.0.0.0 = default)</label>
                     <input type="text" name="proxy.proxy_ip" value="${escapeHtml(proxy.proxy_ip || '0.0.0.0')}">
                 </div>
                 <div class="form-group">
-                    <label>Proxy Port</label>
+                    <label>Proxy port</label>
                     <input type="number" name="proxy.proxy_port" value="${proxy.proxy_port || 5000}">
                 </div>
                 <div class="form-group">
-                    <label>Proxy URL pattern</label>
+                    <label>Default Proxy URL pattern</label>
                     <input type="text" name="proxy.proxy_url_pattern" value="${escapeHtml(proxy.proxy_url_pattern || '/play/{service}/{video_id}')}">
+                    <p class="card-desc"><strong>Note:</strong> Additional proxy routes are available and can be customized manually in the configuration file.</p>
                 </div>
                 <div class="form-group">
                     <label>Default operating mode</label>
@@ -1194,11 +1286,11 @@ function renderSettingsForm(configData) {
             <h3>DLNA / UPnP settings</h3>
             <div class="form-stack">
                 <div class="form-group">
-                    <label>DLNA Bind IP (0.0.0.0 = default)</label>
+                    <label>DLNA bind IP (0.0.0.0 = default)</label>
                     <input type="text" name="dlna.dlna_ip" value="${escapeHtml(dlna.dlna_ip || '0.0.0.0')}">
                 </div>
                 <div class="form-group">
-                    <label>DLNA Port</label>
+                    <label>DLNA port</label>
                     <input type="number" name="dlna.dlna_port" value="${dlna.dlna_port || 8200}">
                 </div>
                 <div class="form-group">
@@ -1214,6 +1306,7 @@ function renderSettingsForm(configData) {
 
         <div class="card margin-top">
             <h3>Playlist synchronization settings</h3>
+            <p class="card-desc">Here you can enable the automatic sync scheduler. On the Playlists tab, you can exclude individual playlists from auto-sync, or set individual sync intervals if desired.</p>
             <div class="switch-container margin-top">
                 <span class="switch-label">Enable automatic playlist sync scheduler</span>
                 <label class="switch">
@@ -1223,7 +1316,7 @@ function renderSettingsForm(configData) {
             </div>
             <div class="form-stack">
                 <div class="form-group">
-                    <label>Sync interval (seconds)</label>
+                    <label>Default sync interval (seconds)</label>
                     <input type="number" name="sync.sync_interval" value="${syncCfg.sync_interval || 3600}">
                 </div>
             </div>
@@ -1247,11 +1340,11 @@ function renderSettingsForm(configData) {
             </div>
             <div class="form-stack">
                 <div class="form-group">
-                    <label>Dashboard Bind IP (0.0.0.0 = default)</label>
+                    <label>Dashboard bind IP (0.0.0.0 = default)</label>
                     <input type="text" name="dashboard.dashboard_ip" value="${escapeHtml(dash.dashboard_ip || '0.0.0.0')}">
                 </div>
                 <div class="form-group">
-                    <label>Dashboard Port</label>
+                    <label>Dashboard port</label>
                     <input type="number" name="dashboard.dashboard_port" value="${dash.dashboard_port || 5001}">
                 </div>
             </div>
@@ -1522,6 +1615,7 @@ async function pollForServerReturn() {
             
             if (res.ok) {
                 showToast("Successfully restarted daemon! Reloading...", false);
+                SseLogger.stop();
                 setTimeout(() => {
                     window.location.href = window.location.pathname + window.location.hash;
                     window.location.reload();
@@ -1537,6 +1631,44 @@ async function pollForServerReturn() {
     setTimeout(check, 5000);
 }
 
+async function purgeCdnUrlCache() {
+    openDeleteModal('urlcache', 'urlcache');
+}
+
+async function executePurgeCdnUrlCache() {
+    try {
+        const res = await fetch('/api/cache/purge', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message);
+            fetchStatus();
+        } else {
+            showToast(data.message || 'Failed to purge URL cache', true);
+        }
+    } catch (err) {
+        showToast('Error connecting to server', true);
+    }
+}
+
+function purgePlaylistLibrary() {
+    openDeleteModal('library', 'library');
+}
+
+async function executePurgeLibrary() {
+    try {
+        const res = await fetch('/api/library/purge', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(data.message);
+            fetchStatus();
+        } else {
+            showToast(data.message || 'Failed to reset library', true);
+        }
+    } catch (err) {
+        showToast('Error connecting to server', true);
+    }
+}
+
 function escapeHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -1544,3 +1676,121 @@ function escapeHtml(str) {
 function escapeJs(str) {
     return String(str).replace(/'/g, "\\'");
 }
+
+function formatLastSync(ts) {
+    if (!ts || ts === 0) return 'Never';
+    const d = new Date(ts * 1000);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (isToday) return timeStr;
+
+    const dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return `${dateStr}, ${timeStr}`;
+}
+
+const SseLogger = {
+    source: null,
+    lastId: 0,
+    typeMap: { 'S': 'success', 'E': 'error', 'W': 'warning', 'I': 'info', 'D': 'debug' },
+
+    init() {
+        console.log("Initializing log display...");
+        this.connect();
+    },
+
+    updateStatus(state) {
+        const dot = document.getElementById('log-status-dot');
+        const txt = document.getElementById('log-status-text');
+        if (!dot || !txt) return;
+
+        dot.classList.remove('live', 'connecting', 'offline');
+
+        if (state === 'live') {
+            dot.classList.add('live');
+            txt.innerText = "Live";
+        } else if (state === 'connecting') {
+            dot.classList.add('connecting');
+            txt.innerText = "Connecting...";
+        } else {
+            dot.classList.add('offline');
+            txt.innerText = "Offline";
+        }
+    },
+
+    stop() {
+        if (this.source) {
+            this.source.close();
+            this.source = null;
+        }
+        this.updateStatus('offline');
+    },
+
+    connect() {
+        this.stop();
+        this.updateStatus('connecting');
+        this.source = new EventSource("/api/logs/stream");
+
+        this.source.onopen = () => {
+            console.log("SSE: Connection established.");
+            this.updateStatus('live');
+        };
+
+        this.source.onmessage = (event) => {
+            try {
+                const entry = JSON.parse(event.data);
+                const isHistory = (this.lastId === 0); 
+                this.appendLog(entry, isHistory);
+                this.lastId = entry.id;
+                this.updateStatus('live');
+            } catch (e) {
+                console.error("SseLogger: JSON Parse Error", e);
+            }
+        };
+
+        this.source.onerror = () => {
+            this.updateStatus('offline');
+            this.lastId = 0;
+        };
+    },
+
+    appendLog(e, isHistory) {
+        const win = document.getElementById('log-window');
+        if (!win) return;
+
+        const timeStr = new Date(e.t * 1000).toLocaleTimeString([], {hour12: false});
+        const label = e.c ? `${e.s}:${e.c}` : e.s;
+        const semanticType = this.typeMap[e.y] || 'info';
+        
+        const html = `<div class="log-line"><span class="log-time">[${timeStr}]</span> <span class="log-src">[${label}]</span> <span class="log-type type-${semanticType}">${e.y}</span>: <span class="log-msg">${this.clean(e.m)}</span></div>`;
+
+        const wasAtBottom = (win.scrollHeight - win.clientHeight <= win.scrollTop + 80) || (this.lastId === 0);
+        win.insertAdjacentHTML('beforeend', html);
+        
+        if (wasAtBottom) {
+            if (isHistory) {
+                win.scrollTop = win.scrollHeight;
+            } else {
+                window.requestAnimationFrame(() => {
+                    win.scrollTop = win.scrollHeight;
+                });
+            }
+        }
+
+        if (win.childNodes.length > 1000) {
+            win.removeChild(win.firstChild);
+        }
+    },
+
+    clean(str) {
+        let cleaned = str.replace(/\u001b\[[0-9;]*m/g, '');
+        const p = document.createElement('p');
+        p.textContent = cleaned;
+        return p.innerHTML;
+    }
+};
+
+window.addEventListener('load', () => {
+    setTimeout(() => { SseLogger.init(); }, 1000);
+});

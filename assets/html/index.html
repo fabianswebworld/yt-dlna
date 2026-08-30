@@ -51,7 +51,7 @@
         <!-- Toast Notifications -->
         <div id="toast" class="toast hidden"></div>
 
-        <!-- TAB 1: STATUS, SYSTEM CONTROL -->
+        <!-- TAB 1: STATUS, SYSTEM CONTROL, LOGS -->
         <div id="tab-status" class="tab-content active">
             <section class="card">
                 <h2>System Overview</h2>
@@ -84,7 +84,6 @@
             </section>
 
             <section class="card">
-
                 <h2>Statistics</h2>
                 <h4>Library Statistics (persistent)</h4>
                 <div class="status-grid">
@@ -122,13 +121,35 @@
                     </div>
                 </div>
                 <div class="actions">
-                    <button class="btn primary" id="btn-reload-config">Reload Configuration</button>
-                    <button class="btn danger" id="btn-show-restart-modal">Restart Daemon</button>
+                    <button class="btn btn-small primary" id="btn-reload-config">Reload Configuration</button>
+                    <button class="btn btn-small danger" id="btn-show-restart-modal">Restart Daemon</button>
+                    <button class="btn btn-small secondary" id="btn-purge-cache">Purge CDN URL Cache</button>
+                    <button class="btn btn-small secondary" id="btn-purge-library">Reset Library</button>
                 </div>
             </section>
+
+            <section id="log-section" class="card playlist-card collapsed" style="padding: 0; overflow: hidden;">
+                <div class="playlist-card-header" style="padding: 20px;">
+                    <div class="playlist-title-group" onclick="togglePlaylistCard(this)">
+                        <span class="chevron">▲</span>
+                        <span class="playlist-title">System Logs</span>
+                    </div>
+                    <div class="log-status-indicator" style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                        <span id="log-status-dot" class="dot"></span>
+                        <span id="log-status-text" class="playlist-count" style="margin: 0;">Connecting...</span>
+                    </div>
+                </div>
+
+                <div class="playlist-card-body" style="padding-top: 0 !important;">
+                    <div class="card-body-content" style="padding: 0 20px 20px 20px;">
+                        <div id="log-window" class="log-viewport"></div>
+                    </div>
+                </div>
+            </section>
+
         </div>
 
-        <!-- TAB 2: PLAYLISTS MANAGER -->
+        <!-- TAB 2: PLAYLISTS -->
         <div id="tab-playlists" class="tab-content">
             <!-- Sub-Tab Navigation Bar -->
             <div class="sub-nav-tabs">
@@ -142,7 +163,7 @@
                     <div class="card-header-actions">
                         <h2>Online Playlists</h2>
                         <div class="actions">
-                            <button class="btn secondary" id="btn-sync-all">Sync All Online Playlists</button>
+                            <button class="btn secondary" id="btn-sync-all"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px; padding-bottom: 2px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>Sync All Online Playlists</button>
                             <button class="btn primary" id="btn-add-playlist-modal">+ Add Online Playlist</button>
                         </div>
                     </div>

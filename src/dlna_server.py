@@ -21,6 +21,8 @@ import sync
 # ==============================================================================
 # --- configuration & constants ---
 # ==============================================================================
+_LOG_SRC = __name__
+
 config = utils.load_config()
 DLNA_IP = config.get('dlna', 'dlna_ip', fallback='0.0.0.0')
 DLNA_PORT = config.getint('dlna', 'dlna_port', fallback=8200)
@@ -151,7 +153,7 @@ def trigger_sync(playlist_name=None):
     try:
         threading.Thread(target=sync.run_sync, args=(playlist_name,), daemon=True).start()
     except Exception as e:
-        print(f"[DLNA] Error triggering sync: {e}")
+        utils.log(_LOG_SRC, f"Error triggering sync: {e}", level=1, type='E')
 
 def get_custom_node_and_mode(file_path, internal_path):
     """
@@ -266,12 +268,12 @@ class DLNAHandler(BaseHTTPRequestHandler):
             enabled_titles = [pl['title'] for pl in active_configs if pl.get('enabled', True)]
 
             if target_pl and target_pl not in enabled_titles:
-                print(f"[DLNA] Ignored sync request for disabled playlist: {target_pl}")
+                utils.log(_LOG_SRC, f"Ignored sync request for disabled playlist: {target_pl}", level=2, type='W')
                 self.send_response(403)
                 self.end_headers()
                 return
 
-            print(f"[DLNA] Refresh stream triggered for '{target_pl or 'all'}'. Launching background sync...")
+            utils.log(_LOG_SRC, f"Refresh stream triggered for '{target_pl or 'all'}'. Launching background sync...")
             trigger_sync(target_pl)
 
             dummy_path = os.path.join("assets", "dummy.mp3")
@@ -439,7 +441,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
                 m_count = re.search(r'<RequestedCount[^>]*>(\d+)</RequestedCount>', post_data, re.IGNORECASE)
                 if m_count: req_count = int(m_count.group(1))
 
-                print(f"[DLNA] Browse '{obj_id}' (Start: {start_idx}, Count: {req_count})")
+                utils.log(_LOG_SRC, f"Browse '{obj_id}' (Start: {start_idx}, Count: {req_count})", level=4)
                 
                 # collect all potential items in a list for slicing
                 all_items = []
@@ -554,8 +556,11 @@ class DLNAHandler(BaseHTTPRequestHandler):
 
                         # playlist items
                         if requested_folder in library:
+                            pl_data = library[requested_folder]
+                            items = pl_data.get('items', []) if isinstance(pl_data, dict) else pl_data
+                            config = utils.load_config()
                             remux_to_ts = config.get('proxy', 'remux_target_format', fallback='ts').strip().lower() == 'ts'
-                            for idx, entry in enumerate(library[requested_folder]):
+                            for idx, entry in enumerate(items):
                                 v_id = entry.get('id')
                                 proxy_url = entry.get('proxy_url')
                                 

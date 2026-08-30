@@ -11,20 +11,30 @@ import os
 import json
 import urllib.parse
 import threading
+import time
 import utils
 import proxy
+
+_LOG_SRC = __name__
 
 # thread-safe locks for playlist processing and database file writing
 _sync_lock = threading.Lock()
 _file_lock = threading.Lock()
 _currently_syncing = set()
 
+def is_busy():
+    """Returns True if any playlist is currently being synced."""
+    with _sync_lock:
+        return len(_currently_syncing) > 0
+
 def run_sync(targets=None):
     config = utils.load_config()
     base_url = utils.get_stream_base_url()
     url_pattern = utils.get_stream_pattern()
     precache_enabled = config.getboolean('sync', 'precache_cdn_urls', fallback=True)
-    sync_interval = config.getint('sync', 'sync_interval', fallback=3600)
+    global_interval = config.getint('sync', 'sync_interval', fallback=3600)
+    is_sync_all = (targets is None or len(targets) == 0)
+    now = time.time()
     
     # parse targets into a normalized lowercase list if provided
     target_list = []
@@ -46,7 +56,8 @@ def run_sync(targets=None):
 
         folder_name = pl['title']
         service_name = pl['service']
-        
+        current_pl_interval = int(pl.get('sync_interval', global_interval))
+
         # smart target matching: skip playlist if targets specified and matches neither title nor service
         if target_list:
             match_title = folder_name.lower() in target_list
@@ -58,7 +69,7 @@ def run_sync(targets=None):
         folder_key = folder_name.lower()
         with _sync_lock:
             if folder_key in _currently_syncing:
-                print(f"[Sync] Playlist '{folder_name}' is currently being synced. Skipping.")
+                utils.log(_LOG_SRC, f"Playlist '{folder_name}' is currently being synced. Skipping.", level=2)
                 continue
             _currently_syncing.add(folder_key)
 
@@ -75,7 +86,7 @@ def run_sync(targets=None):
             else:
                 playlist_url = raw_url
 
-            print(f"[Sync] Indexing {folder_name} ({service_name})...")
+            utils.log(_LOG_SRC, f"Indexing '{folder_name}' ({service_name})...")
             
             ydl_opts = {
                 'extract_flat': True,
@@ -142,7 +153,6 @@ def run_sync(targets=None):
                         
                         item_dict = {
                             "id": v_id,
-                            "service": service_name,
                             "title": clean_title,
                             "channel": channel_name,
                             "duration": duration_sec,
@@ -178,29 +188,36 @@ def run_sync(targets=None):
                 if precache_enabled and video_list:
                     try:
                         v_ids = [item['id'] for item in video_list]
-                        print(f"[Sync] Pre-caching {folder_name}...")
+                        utils.log(_LOG_SRC, f"Pre-caching '{folder_name}'...", "cache")
                         proxy.resolve_cdn_urls_batch(
                             v_ids, 
                             service_name=service_name, 
-                            min_remaining_ttl=sync_interval
+                            min_remaining_ttl=current_pl_interval
                         )
+                        utils.log(_LOG_SRC, f"CDN URL cache updated for playlist '{folder_name}'.", "cache", type='S')
                     except Exception as e:
-                        print(f"[Sync] Pre-cache warning for {folder_name}: {e}")
-            
-            synced_entry = {folder_name: video_list}
+                        utils.log(_LOG_SRC, f"Error while pre-caching '{folder_name}': {e}", "cache", level=1, type='E')
+
+            synced_entry = {
+                folder_name: {
+                    "service": service_name,
+                    "last_sync": now,
+                    "items": video_list
+                }
+            }
 
         except Exception as e:
-            print(f"[Sync] Failed to sync {folder_name}: {e}")
+            utils.log(_LOG_SRC, f"Failed to sync '{folder_name}': {e}", level=1, type='E')
             
             # inject explicit failure notification item into library on extraction error
             refresh_url = f"{base_url}/virtual_refresh_stream?playlist={urllib.parse.quote(folder_name)}"
-            synced_entry = {folder_name: [{
-                "id": "sync_failed_notice",
-                "service": service_name,
-                "title": "[Sync Failed: Check Cookie File / Login Settings]",
-                "is_error": True,
-                "proxy_url": refresh_url
-            }]}
+            synced_entry = {
+                folder_name: {
+                    "service": service_name,
+                    "last_sync": now,
+                    "items": [{"id": "sync_failed_notice", "title": "[Sync Failed: Check Cookie File / Login Settings]", "proxy_url": refresh_url, "is_error": True}]
+                }
+            }
 
         finally:
             # always release folder from active syncing set when finished or on error
@@ -209,53 +226,35 @@ def run_sync(targets=None):
 
         # --- incremental atomic read-merge-write after each playlist completes
         if synced_entry:
-            with _file_lock:
-                disk_library = {}
-                if os.path.exists(utils.JSON_PATH):
-                    try:
-                        with open(utils.JSON_PATH, "r", encoding="utf-8") as f:
-                            disk_library = json.load(f)
-                    except Exception:
-                        disk_library = {}
-
+            with utils._file_lock:
+                disk_library = utils.get_library(force_reload=True)
                 disk_library.update(synced_entry)
 
-                # re-order dictionary keys to match exact section order in yt-dlna.conf
+                # re-order dictionary keys to match section order in yt-dlna.conf
                 ordered_library = {}
                 for p in playlists:
                     f_name = p['title']
                     if f_name in disk_library:
                         ordered_library[f_name] = disk_library[f_name]
 
-                os.makedirs(os.path.dirname(utils.JSON_PATH), exist_ok=True)
-                with open(utils.JSON_PATH, "w", encoding="utf-8") as f:
-                    json.dump(ordered_library, f, indent=4, ensure_ascii=False)
+                utils.replace_save_json(utils.JSON_PATH, ordered_library, indent=4)
 
-    print(f"[Sync] Playlists synchronized.")
-    if precache_enabled:
-        print(f"[Sync] CDN URL cache updated.")
+            utils.log(_LOG_SRC, f"Playlist '{folder_name}' synchronized.", type='S')
+            utils.get_library(force_reload=True)
+
+    if is_sync_all:
+        utils.log(_LOG_SRC, "All playlists synchronized.", type='S')
+        if precache_enabled:
+            utils.log(_LOG_SRC, "CDN URL cache updated.", "cache", type='S')
 
 def rename_playlist_data(old_name, new_name):
     """Renames a playlist key in playlists.json using the internal file lock."""
     with _file_lock:
-        if not os.path.exists(utils.JSON_PATH):
-            return
-        try:
-            with open(utils.JSON_PATH, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if not content: return
-                library = json.loads(content)
-
-            if old_name in library:
-                # atomically swap keys
-                library[new_name] = library.pop(old_name)
-                
-                with open(utils.JSON_PATH, 'w', encoding='utf-8') as f:
-                    json.dump(library, f, indent=4, ensure_ascii=False)
-                print(f"[Sync] Library entry renamed: '{old_name}' -> '{new_name}'")
-        except Exception as e:
-            print(f"[Sync] Error renaming library entry: {e}")
-            raise e
+        library = utils.get_library(force_reload=True)
+        if old_name in library:
+            library[new_name] = library.pop(old_name)
+            utils.replace_save_json(utils.JSON_PATH, library, indent=4)
+            utils.log(_LOG_SRC, f"Library entry renamed: '{old_name}' -> '{new_name}'")
 
 if __name__ == "__main__":
     run_sync()

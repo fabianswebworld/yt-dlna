@@ -1,3 +1,19 @@
+1.2.0 (2026-08-30)
+
+- New: Custom sync intervals per playlist
+- New: Time of last playlist sync is shown in Web UI now
+- New: Command-line options and Web UI buttons to rebuild playlist library and purge CDN URL cache
+- New: Command-line options --sync and --serve can be used together, forcing an initial sync of all playlists before launching the daemon
+- New: Logs are visible in the Web UI with live update
+- New: Added proxy routes for explicitly selecting remux target formats (/remux/mp4, /remux/ts)
+- Improved: Logging now uses colors and has configurable verbosity (via configuration and command-line option)
+- Improved: Optimized handling (caching) of the configuration file for minimized disk I/O
+- Improved: Saving JSON files is done via a save-replace operation, avoiding conflicts with external processes writing to them
+- Improved: Clearer wording in Web UI regarding settings inheritance for playlists
+- Improved: Some more Web UI tweaks, like improved mobile views etc.
+- Fixed: Wrong CDN URLs could get stored in cache if resolution previously had failed for one or more videos
+- Fixed: Stale ffmpeg processes could remain in memory after client disconnects in TS mode
+
 1.1.0 (2026-08-16)
 
 - New: Introduced on-the-fly DASH remultiplexing via ffmpeg
