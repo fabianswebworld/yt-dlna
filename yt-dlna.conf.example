@@ -157,7 +157,7 @@ use_cookies_for_playlists = no
 use_cookies_for_playback = no
 
 # default yt-dlp format selector for progressive (single-file) MP4 video
-format = b[ext=mp4][protocol^=http] / 18 / b / best
+format = b[ext=mp4][protocol^=http]/b/best/18
 
 # default yt-dlp format selector for desired DASH streams;
 # only used if enable_remux is set in the [proxy] section and there
@@ -193,11 +193,18 @@ title_format = {index}. {channel}: {title} ({duration})
 #                              default_cache_ttl from the [proxy] section is used
 #   title_format               custom title template for this specific service
 
+[services:auto]
+# this service is always available; it omits the extractor
+# to allow yt-dlp to auto-detect any service/website automatically
+format_dash = bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]
+cache_ttl = 18000
+title_format = {index}. {channel}: {title} ({duration})
+
 [services:youtube]
 extractor = youtube
 use_cookies_for_playlists = yes
 cookie_path = data/cookies-yt.txt
-format_dash = (137/136/135)+140
+format_dash = bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]
 cache_ttl = 18000
 title_format = {index}. {channel}: {title} ({duration})
 
@@ -218,8 +225,8 @@ title_format = {title}
 
 [playlists]
 # the default service to use for a playlist if none is specified; this again
-# defaults to 'youtube'
-default_service = youtube
+# defaults to 'auto'
+default_service = auto
 
 # maximum number of items to sync per playlist; no limit if not set or set to 0
 limit_items = 25
@@ -261,14 +268,17 @@ sort_by = none
 #                     sync_interval setting in the [sync] section
 
 [playlists:YouTube Watch Later]
+service = youtube
 url = WL
 
 [playlists:YouTube Liked Videos]
+service = youtube
 url = LL
 limit_items = 20
 enabled = no
 
 [playlists:YouTube Favorites]
+service = youtube
 url = FL
 limit_items = 20
 enabled = no
