@@ -19,7 +19,7 @@ import yt_dlp
 import queue
 from collections import deque
 
-__version__ = "1.2.0"
+__version__ = "1.3.0-dev"
 
 # step up one level to application root where config and data folders reside
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -169,7 +169,7 @@ def log(source, message, context=None, level=3, type='I'):
         "c":  context,
         "m":  message,
         "l":  level,
-        "y":  type # 'y' for type (since 't' is taken)
+        "y":  type
     }
     
     _LOG_BUFFER.append(entry)
@@ -255,12 +255,12 @@ def _update_config_file(updates_dict):
                 trailing_blanks = []
                 while new_lines and not new_lines[-1].strip():
                     trailing_blanks.append(new_lines.pop())
-                
+
                 # append new keys
                 for k, v in updates_dict[current_section].items():
                     if k not in seen_keys and v is not None:
                         new_lines.append(f"{k} = {v}\n")
-                
+
                 # restore the trailing blank lines (preserving section spacing)
                 while trailing_blanks:
                     new_lines.append(trailing_blanks.pop())
@@ -358,9 +358,7 @@ def rename_config_section(old_section, new_section):
     load_config(force_reload=True)
 
 def reorder_config_sections(section_prefix, new_order_names):
-    """
-    Reorders config sections while keeping comments in place.
-    """
+    """Reorders config sections while keeping comments in place."""
     if not os.path.exists(CONFIG_FILE):
         return
 
@@ -368,7 +366,7 @@ def reorder_config_sections(section_prefix, new_order_names):
         lines = f.readlines()
 
     target_prefix = section_prefix if section_prefix.endswith(':') else f"{section_prefix}:"
-    
+
     # index of the first target section header, lines (comments) above it never move
     anchor_idx = -1
     for i, line in enumerate(lines):
@@ -376,7 +374,7 @@ def reorder_config_sections(section_prefix, new_order_names):
         if stripped.startswith(f"[{target_prefix}") and stripped.endswith(']'):
             anchor_idx = i
             break
-            
+
     if anchor_idx == -1:
         return
 
@@ -545,8 +543,9 @@ def get_secure_path(relative_path, check_exists=False):
 
 # --- service configuration helpers ---
 
-def get_service_config(service_name='youtube'):
+def get_service_config(service_name='auto'):
     config = load_config()
+    service_name = (service_name or 'auto').strip().lower()
     service_section = f"services:{service_name}"
     
     # default fallbacks from [services] and [proxy]
@@ -567,7 +566,8 @@ def get_service_config(service_name='youtube'):
         cookie_path = sec.get('cookie_path', fallback=global_cookie_path).strip()
         enable_cache = config.getboolean(service_section, 'enable_cache', fallback=global_enable_cache)
         cache_ttl = config.getint(service_section, 'cache_ttl', fallback=global_default_ttl)
-        extractor = sec.get('extractor', fallback=service_name).strip().lower()
+        extractor_raw = sec.get('extractor', fallback='').strip().lower()
+        extractor = extractor_raw if extractor_raw else (None if service_name == 'auto' else service_name)
         fmt = sec.get('format', fallback=global_fmt).strip()
         fmt_dash = sec.get('format_dash', fallback=global_fmt_dash).strip()
         title_fmt = sec.get('title_format', fallback=global_title_fmt).strip()
@@ -576,9 +576,9 @@ def get_service_config(service_name='youtube'):
         use_pb_cookies = global_use_pb_cookies
         cookie_path = global_cookie_path
         enable_cache = global_enable_cache
-        # guarantee youtube default service config with 18000 cache_ttl
-        cache_ttl = 18000 if service_name == 'youtube' else global_default_ttl
-        extractor = 'youtube' if service_name == 'youtube' else service_name.lower()
+        cache_ttl = 18000 if service_name in ('youtube', 'auto') else global_default_ttl
+        # set to None means yt-dlp auto-selects extractor
+        extractor = None if service_name == 'auto' else ('youtube' if service_name == 'youtube' else service_name)
         fmt = global_fmt
         fmt_dash = global_fmt_dash
         title_fmt = global_title_fmt
@@ -600,7 +600,7 @@ def get_service_config(service_name='youtube'):
 
 def get_playlists_config():
     config = load_config()
-    default_service = config.get('playlists', 'default_service', fallback='youtube').strip().lower()
+    default_service = config.get('playlists', 'default_service', fallback='auto').strip().lower()
     global_limit = config.getint('playlists', 'limit_items', fallback=0)
     global_sort = config.get('playlists', 'sort_by', fallback='none').strip().lower()
     playlists = []
@@ -649,7 +649,7 @@ def format_item_title(entry, enum_idx=1):
     raw_title = entry.get('title', 'Video')
     raw_channel = entry.get('channel', '')
     duration_sec = entry.get('duration')
-    service_name = entry.get('service', 'youtube')
+    service_name = entry.get('service', 'auto')
 
     srv_cfg = get_service_config(service_name)
     fmt_template = srv_cfg['title_format']
@@ -676,7 +676,7 @@ def format_item_title(entry, enum_idx=1):
 
 # --- CDN URL cache helpers ---
 
-def get_cached_url(video_id, service_name='youtube', min_remaining_ttl=0):
+def get_cached_url(video_id, service_name='auto', min_remaining_ttl=0):
     srv_cfg = get_service_config(service_name)
     if not srv_cfg['enable_cache']:
         return None
@@ -705,7 +705,7 @@ def get_cached_url(video_id, service_name='youtube', min_remaining_ttl=0):
             pass
     return None
 
-def set_cached_url(video_id, entry_data, service_name='youtube'):
+def set_cached_url(video_id, entry_data, service_name='auto'):
     srv_cfg = get_service_config(service_name)
     if not srv_cfg['enable_cache']:
         return
@@ -809,6 +809,10 @@ def extract_youtube_info(url, extra_opts=None, use_cookies=True, cookie_path=Non
         }
         if extra_opts:
             ydl_opts.update(extra_opts)
+            if 'ies' in ydl_opts:
+                ies_list = ydl_opts.pop('ies')
+                if ies_list and ies_list[0]:
+                    ydl_opts['allowed_extractors'] = [f"(?i){ie}.*" for ie in ies_list]
 
         # --- debug output ---
         log(_LOG_SRC, f"yt-dlp module call for: {url}", "yt-dlp", level=5, type='D')
@@ -851,12 +855,12 @@ def extract_youtube_info(url, extra_opts=None, use_cookies=True, cookie_path=Non
                 cmd.extend(['--playlist-end', str(extra_opts['playlistend'])])
             if 'format' in extra_opts:
                 cmd.extend(['-f', extra_opts['format']])
-            if 'ies' in extra_opts:
+            # only add --use-extractors if an explicit extractor is defined
+            if 'ies' in extra_opts and extra_opts['ies'] and extra_opts['ies'][0]:
                 ie_regexes = [f"(?i){ie}.*" for ie in extra_opts['ies']]
                 cmd.extend(['--use-extractors', ','.join(ie_regexes)])
 
-            # translate extractor_args dict to CLI format: --extractor-args "ie:key=val;key2=val"
-            if extra_opts and 'extractor_args' in extra_opts:
+            if 'extractor_args' in extra_opts:
                 for extractor, args in extra_opts['extractor_args'].items():
                     arg_strings = []
                     for arg_key, arg_val in args.items():

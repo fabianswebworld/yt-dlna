@@ -30,25 +30,8 @@ flask_log.setLevel(logging.ERROR)
 config = utils.load_config()
 app = Flask(__name__)
 
-# helper to set up flask routes from patterns
-def get_flask_path(key, default, is_static=False):
-    pattern = config.get('proxy', key, fallback=default)
-    if is_static:
-        return pattern.replace('{video_id}', '<path:target_url>')
-    return pattern.replace('{service}', '<service>').replace('{video_id}', '<path:video_id>')
-
-# read configured routes
-path_play      = get_flask_path('proxy_url_pattern', '/play/{service}/{video_id}')
-path_redirect  = get_flask_path('proxy_url_pattern_redirect', '/redirect/{service}/{video_id}')
-path_proxy     = get_flask_path('proxy_url_pattern_proxy', '/proxy/{service}/{video_id}')
-path_remux     = get_flask_path('proxy_url_pattern_remux', '/remux/{service}/{video_id}')
-path_remux_mp4 = get_flask_path('proxy_url_pattern_remux_mp4', '/remux/mp4/{service}/{video_id}')
-path_remux_ts  = get_flask_path('proxy_url_pattern_remux_ts', '/remux/ts/{service}/{video_id}')
-
-# read configured routes for static playlists
-path_bounce    = get_flask_path('proxy_url_pattern_bounce', '/bounce/{video_id}', is_static=True)
-path_reflect   = get_flask_path('proxy_url_pattern_reflect', '/reflect/{video_id}', is_static=True)
-path_hit       = get_flask_path('proxy_url_pattern_hit', '/hit/{video_id}', is_static=True)
+# disable automatic Werkzeug URL slash collapsing and 308 redirects
+app.url_map.merge_slashes = False
 
 def log_ffmpeg_stderr(proc):
     """Background helper to log ffmpeg error output and close pipe safely."""
@@ -68,7 +51,15 @@ def log_ffmpeg_stderr(proc):
         except Exception:
             pass
 
-def resolve_cdn_url(video_id, service_name='youtube', min_remaining_ttl=0, force_dash=False):
+def _normalize_video_url(video_id, extractor=None):
+    """Normalizes a raw video ID or URL into a fully-qualified URL for yt-dlp."""
+    if video_id.startswith('http://') or video_id.startswith('https://'):
+        return video_id
+    if extractor == 'youtube' or extractor is None:
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return video_id
+
+def resolve_cdn_url(video_id, service_name='auto', min_remaining_ttl=0, force_dash=False):
     """Helper to fetch URL or DASH formats from cache or extract fresh via yt-dlp."""
     video_id = urllib.parse.unquote(video_id)
     config = utils.load_config()
@@ -89,15 +80,8 @@ def resolve_cdn_url(video_id, service_name='youtube', min_remaining_ttl=0, force
     utils.log(_LOG_SRC, f"Cache MISS for {service_name}:{utils.short(video_id)}. Resolving via yt-dlp...", level=-3)
     utils.log(_LOG_SRC, f"Cache MISS for {service_name}:{video_id}. Resolving via yt-dlp...", level=4)
 
-    # check extractor name for special handling of yt video ids
-    if video_id.startswith('http://') or video_id.startswith('https://'):
-        video_url = video_id
-    elif srv_cfg['extractor'] == 'youtube':
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-    else:
-        video_url = video_id
+    video_url = _normalize_video_url(video_id, srv_cfg['extractor'])
 
-    # construct effective format selector
     format_single = srv_cfg['format'].replace(' ', '')
     format_dash = srv_cfg.get('format_dash', '').strip().replace(' ', '')
 
@@ -119,7 +103,6 @@ def resolve_cdn_url(video_id, service_name='youtube', min_remaining_ttl=0, force
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
-        'ies': [srv_cfg['extractor']],
         'format': effective_format,
         'skip_download': True,
         'extractor_args': {
@@ -128,6 +111,8 @@ def resolve_cdn_url(video_id, service_name='youtube', min_remaining_ttl=0, force
             }
         }
     }
+    if srv_cfg['extractor']:
+        ydl_opts['ies'] = [srv_cfg['extractor']]
 
     info = utils.extract_youtube_info(
         video_url, 
@@ -160,7 +145,7 @@ def resolve_cdn_url(video_id, service_name='youtube', min_remaining_ttl=0, force
     utils.set_cached_url(video_id, entry, service_name=service_name)
     return entry, False
 
-def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=0):
+def resolve_cdn_urls_batch(video_ids, service_name='auto', min_remaining_ttl=0):
     """Batch resolves missing or expired CDN URLs for a list of video IDs in a single pass."""
     if not video_ids:
         return {}
@@ -181,12 +166,7 @@ def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=
             results[v_id] = cached
         else:
             missing_ids.append(v_id)
-            if v_id.startswith('http://') or v_id.startswith('https://'):
-                missing_urls.append(v_id)
-            elif srv_cfg['extractor'] == 'youtube':
-                missing_urls.append(f"https://www.youtube.com/watch?v={v_id}")
-            else:
-                missing_urls.append(v_id)
+            missing_urls.append(_normalize_video_url(v_id, srv_cfg['extractor']))
 
     if not missing_ids:
         utils.log(_LOG_SRC, "Batch resolve: Nothing to do for this collection.")
@@ -194,7 +174,6 @@ def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=
 
     utils.log(_LOG_SRC, f"Batch resolving {len(missing_ids)} missing/expired CDN URL(s) for service '{service_name}'...")
 
-    # construct effective format selector for batch extraction
     format_single = srv_cfg['format'].replace(' ', '')
     format_dash = srv_cfg.get('format_dash', '').strip().replace(' ', '')
 
@@ -216,7 +195,6 @@ def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
-        'ies': [srv_cfg['extractor']],
         'format': effective_format,
         'skip_download': True,
         'extractor_args': {
@@ -225,8 +203,9 @@ def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=
             }
         }
     }
+    if srv_cfg['extractor']:
+        ydl_opts['ies'] = [srv_cfg['extractor']]
 
-    # single pass extraction for all missing URLs
     extracted_infos = utils.extract_youtube_info(
         missing_urls, 
         extra_opts=ydl_opts, 
@@ -292,43 +271,68 @@ def resolve_cdn_urls_batch(video_ids, service_name='youtube', min_remaining_ttl=
 
 # --- Flask route implementations ---
 
-@app.route(path_play)
-def route_play(service, video_id):
+def route_play(video_id, service='auto'):
     return _stream_internal(service, video_id)
 
-@app.route(path_redirect)
-def route_redirect(service, video_id):
+def route_redirect(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='redirect')
 
-@app.route(path_proxy)
-def route_proxy(service, video_id):
+def route_proxy(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='proxy')
 
-@app.route(path_remux)
-def route_remux(service, video_id):
+def route_remux(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='remux')
 
-@app.route(path_remux_mp4)
-def route_remux_mp4(service, video_id):
+def route_remux_mp4(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='remux', target_format_override='mp4')
 
-@app.route(path_remux_ts)
-def route_remux_ts(service, video_id):
+def route_remux_ts(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='remux', target_format_override='ts')
 
-@app.route(path_bounce)
 def route_bounce(target_url):
     return _static_internal(target_url, 'bounce')
 
-@app.route(path_reflect)
 def route_reflect(target_url):
     return _static_internal(target_url, 'reflect')
 
-@app.route(path_hit)
 def route_hit(target_url):
     return _static_internal(target_url, 'hit')
 
-# --- internal handlers ---
+# --- dynamic route registration helpers ---
+
+def get_pattern(key, default):
+    return config.get('proxy', key, fallback=default).strip()
+
+def add_resolving_route(pattern_key, default_pattern, view_func):
+    pattern = get_pattern(pattern_key, default_pattern)
+    
+    # 2-argument route: /route/<service>/<path:video_id>
+    full_path = pattern.replace('{service}', '<service>').replace('{video_id}', '<path:video_id>')
+    app.add_url_rule(full_path, view_func=view_func)
+
+    # 1-argument alias route: /route/<path:video_id> (defaults to 'auto' service)
+    short_pattern = pattern.replace('/{service}/', '/').replace('{service}/', '')
+    short_path = short_pattern.replace('{video_id}', '<path:video_id>')
+    app.add_url_rule(short_path, view_func=view_func)
+
+def add_static_route(pattern_key, default_pattern, view_func):
+    path = get_pattern(pattern_key, default_pattern).replace('{video_id}', '<path:target_url>')
+    app.add_url_rule(path, view_func=view_func)
+
+# bind dynamic resolving routes
+add_resolving_route('proxy_url_pattern', '/play/{service}/{video_id}', route_play)
+add_resolving_route('proxy_url_pattern_redirect', '/redirect/{service}/{video_id}', route_redirect)
+add_resolving_route('proxy_url_pattern_proxy', '/proxy/{service}/{video_id}', route_proxy)
+add_resolving_route('proxy_url_pattern_remux', '/remux/{service}/{video_id}', route_remux)
+add_resolving_route('proxy_url_pattern_remux_mp4', '/remux/mp4/{service}/{video_id}', route_remux_mp4)
+add_resolving_route('proxy_url_pattern_remux_ts', '/remux/ts/{service}/{video_id}', route_remux_ts)
+
+# bind static custom playlist routes
+add_static_route('proxy_url_pattern_bounce', '/bounce/{video_id}', route_bounce)
+add_static_route('proxy_url_pattern_reflect', '/reflect/{video_id}', route_reflect)
+add_static_route('proxy_url_pattern_hit', '/hit/{video_id}', route_hit)
+
+# --- internal stream handlers ---
 
 def _stream_internal(service, video_id, mode_override=None, target_format_override=None):
     """Master handler for all resolving routes."""
@@ -343,7 +347,7 @@ def _stream_internal(service, video_id, mode_override=None, target_format_overri
     try:
         cached_entry, is_cached = resolve_cdn_url(video_id, service_name=service, force_dash=force_remux)
 
-        # --- REMUX: If entry is DASH, stream via ffmpeg in-memory ---
+        # --- REMUX: if entry is DASH, stream via ffmpeg in-memory ---
         if isinstance(cached_entry, dict) and cached_entry.get('is_dash'):
             return _serve_remux_implementation(cached_entry, f"{service}:{video_id}", target_format_override=target_format_override)
 
@@ -358,7 +362,6 @@ def _stream_internal(service, video_id, mode_override=None, target_format_overri
             return redirect(cdn_url, code=302)
 
         # --- PROXY MODE: active proxying of bytes (fallback for TVs that don't follow 302) ---
-        http_headers = cached_entry.get('http_headers') if isinstance(cached_entry, dict) else None
         return _serve_proxy_implementation(cdn_url, f"{service}:{video_id}", is_cached, service)
 
     except Exception as e:
@@ -403,7 +406,6 @@ def _serve_proxy_implementation(cdn_url, identifier, is_cached=False, service=No
     upstream_res = requests.get(cdn_url, headers=req_headers, stream=True)
     final_mime = upstream_res.headers.get('Content-Type', 'video/mp4')
 
-    # If cached link expired early (403/410), purge cache & retry once with fresh URL
     if is_cached and upstream_res.status_code in (403, 404, 410) and service:
         utils.log(_LOG_SRC, f"Cached URL expired for {utils.short(identifier)} ({upstream_res.status_code}). Refreshing...", level=-3)
         utils.log(_LOG_SRC, f"Cached URL expired for {identifier} ({upstream_res.status_code}). Refreshing...", level=4)
@@ -454,9 +456,14 @@ def _serve_remux_implementation(cached_entry, identifier, target_format_override
             '-analyzeduration', '1000000',
             '-reconnect', '1',
             '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '30',
+            '-reconnect_delay_max', '10',
             '-thread_queue_size', '8192',
             '-i', v_url,
+            '-probesize', '524288',
+            '-analyzeduration', '1000000',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '10',
             '-thread_queue_size', '8192',
             '-i', a_url,
             '-map', '0:v:0',
@@ -478,7 +485,15 @@ def _serve_remux_implementation(cached_entry, identifier, target_format_override
             '-loglevel', ffmpeg_loglevel,
             '-probesize', '524288',
             '-analyzeduration', '1000000',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '10',
             '-i', v_url,
+            '-probesize', '524288',
+            '-analyzeduration', '1000000',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '10',
             '-i', a_url,
             '-map', '0:v:0',
             '-map', '1:a:0',
@@ -534,7 +549,7 @@ def _serve_remux_implementation(cached_entry, identifier, target_format_override
         'Content-Type': mime,
         'Accept-Ranges': 'bytes',
         'transferMode.dlna.org': 'Streaming',
-        'contentFeatures.dlna.org': f'{pn_string}DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
+        'contentFeatures.dlna.org': f'{pn_string}DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
     }
     return Response(stream_with_context(generate_remux()), status=200, headers=response_headers)
 

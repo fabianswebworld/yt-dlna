@@ -81,17 +81,21 @@ def run_sync(targets=None):
 
         try:
             # special handling of services that use the youtube extractor
-            if srv_cfg['extractor'] == 'youtube' and not (raw_url.startswith('http://') or raw_url.startswith('https://')):
-                playlist_url = f"https://www.youtube.com/playlist?list={raw_url}"
+            if (srv_cfg['extractor'] == 'youtube' or (srv_cfg['extractor'] is None and not (raw_url.startswith('http://') or raw_url.startswith('https://')))):
+                if not (raw_url.startswith('http://') or raw_url.startswith('https://')):
+                    playlist_url = f"https://www.youtube.com/playlist?list={raw_url}"
+                else:
+                    playlist_url = raw_url
             else:
                 playlist_url = raw_url
 
             utils.log(_LOG_SRC, f"Indexing '{folder_name}' ({service_name})...")
             
             ydl_opts = {
-                'extract_flat': True,
-                'ies': [srv_cfg['extractor']]
+                'extract_flat': True
             }
+            if srv_cfg['extractor']:
+                ydl_opts['ies'] = [srv_cfg['extractor']]
 
             # enable yt-dlp native reverse extraction using negative index slicing for tail items
             if sort_by in ('reverse', 'date', 'date_desc', 'newest'):
@@ -100,7 +104,7 @@ def run_sync(targets=None):
                     ydl_opts['playlist_items'] = f"-{limit_items}:"
 
             # pass approximate_date ONLY if date sorting is requested for youtube
-            if sort_by in ('date', 'date_desc', 'date_asc', 'newest', 'oldest') and srv_cfg['extractor'] == 'youtube':
+            if sort_by in ('date', 'date_desc', 'date_asc', 'newest', 'oldest') and (srv_cfg['extractor'] in ('youtube', None)):
                 ydl_opts['extractor_args'] = {'youtubetab': ['approximate_date']}
 
             # cap playlistend for standard forward extraction
@@ -135,7 +139,7 @@ def run_sync(targets=None):
                             else:
                                 v_id = entry.get('id') or 'unknown'
 
-                        encoded_v_id = urllib.parse.quote(v_id, safe='')
+                        encoded_v_id = urllib.parse.quote(str(v_id), safe='')
                         
                         target_route = (url_pattern
                                         .replace('{service}', service_name)
