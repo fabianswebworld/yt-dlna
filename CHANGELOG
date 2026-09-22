@@ -1,11 +1,20 @@
-1.3.0-dev (not yet released)
+1.3.0 (2026-09-22)
 
-- TODO: New: Introduced "Cast" feature to quickly cast an online video to any DLNA (UPnP) renderer found on the network
-- TODO: New: Allow resolving proxy modes and scheduled proactive resolving for Custom Playlists, enabling for locally-curated, multi-service "Watch Later" playlists
-- TODO: New: Quick "Add to playlist" UI for Custom Playlists being used as local Watch Later lists (also allowing reordering and deleting items)
-- New: Introduced an "auto" service, allowing yt-dlp to chose the extractor automatically, which is the new default (please update yt-dlna.conf accordingly if upgrading)
+- New: Introduced "Play To" feature to quickly play an online video to any DLNA (UPnP) renderer found on the network
+- New: Introduced "Cast-to-UPnP Bridge" feature (DIAL server) to quickly play videos from compatible apps (e.g. the YouTube app) to any DLNA (UPnP) renderer found on the network
+- New: Allow the resolving proxy modes and scheduled proactive resolving for Custom Playlists as well, enabling for locally-curated, multi-service "Watch Later" playlists
+- New: Quick "Add to playlist" UI for Custom Playlists being used as local Watch Later lists (also allowing reordering and deleting items)
+- New: If no Custom Playlists are present, the "Add to playlist" UI offers to quickly create your first "Custom Watch Later" playlist
+- New: Added a "Quick Actions" panel to the dashboard overview page with buttons to commonly used procedures
+- New: Introduced an "auto" service, allowing yt-dlp to choose the extractor automatically, which is the new default (automatically updated in configuration if not customized)
+- New: Added no-remux proxy routes for explicitly disabling remuxing if otherwise enabled
+- New: "View Playlist" page now shows more information, offers direct "Play to" links, and allows for deleting items
 - Improved: Faster startup of ffmpeg remux process
-- Improved: New default DASH format selector for YouTube, fixing URLs not being resolved on multi-language videos (please copy from yt-dlna.conf.example if upgrading)
+- Improved: New default DASH format selector for YouTube, fixing URLs not being resolved on multi-language videos (automatically updated in configuration if not customized)
+- Improved: The UDN UUID for the DLNA server is now auto-generated on first run instead of being hard-coded in dlna_server.py.
+- Improved: "View Playlist" is now implemented as a separate HTML asset instead of inside dashboard.py, making the code more maintainable
+- Improved: Many improvements to Web UI, especially to mobile views
+- Fixed: Using "View Playlist" on an empty Custom Playlist, immediately after creating it, returned HTTP 500
 
 1.2.0 (2026-08-30)
 
