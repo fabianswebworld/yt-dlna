@@ -335,7 +335,7 @@ The **Play To** feature enables you to instantly play any video on your TV or ot
 
 - By using the `/play-to` URL of the Dashboard (accessible by the _Play To_ button on the _Overview_ page): this opens a mobile-friendly page where you can paste any video page URL, select a UPnP/DLNA renderer, and tap "Play on Renderer". It will near-instantly play on your TV.
 - By using one of the _Play To_ action links in the "View" page of any playlist, accessible via the _Playlists_ tab of the Dashboard. The _Play to TV_ link immediately sends the video to the last used (or configured default) renderer, while the _Play to..._ link allows you to select the renderer first.
-- By opening a video in the YouTube mobile app, selecing "Play on device" and then tapping on "yt-dlna Cast/UPnP Bridge".
+- By opening a video in the YouTube mobile app, selecing "Play on device" and then tapping on "yt-dlna Cast/UPnP Bridge". The Cast-to-UPnP bridge currently only works for the YouTube app and uses the open, UPnP-based DIAL (Discovery and Launch) protocol.
 
 ---
 
