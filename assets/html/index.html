@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>yt-dlna - Dashboard</title>
-    <link rel="stylesheet" href="/style.css">
     <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div class="container">
@@ -28,7 +32,7 @@
         <nav class="nav-tabs">
             <button class="tab-btn active" data-tab="tab-status">
                 <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
-                Status
+                Overview
             </button>
             <button class="tab-btn" data-tab="tab-playlists">
                 <svg class="icon" viewBox="0 0 24 24"><path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
@@ -51,8 +55,34 @@
         <!-- Toast Notifications -->
         <div id="toast" class="toast hidden"></div>
 
-        <!-- TAB 1: STATUS, SYSTEM CONTROL, LOGS -->
+        <!-- TAB 1: OVERVIEW, SYSTEM CONTROL, LOGS -->
         <div id="tab-status" class="tab-content active">
+
+            <section class="card">
+                <h2>Quick Actions</h2>
+                <p class="card-desc">To quickly get you started, here you'll find common actions you can use at any time, even without any playlists or services configured:</p>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 12px;">
+                    <div style="background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+                        <div>
+                            <h3 style="margin: 0 0 6px 0; font-size: 1.05rem;">Add video to Watch Later playlist</h3>
+                            <p style="margin: 0; font-size: 0.85rem; color: var(--text-secondary);">Quickly add a video to a Custom Watch Later playlist.</p>
+                        </div>
+                        <div class="actions right">
+                            <a href="/add-to" class="btn primary btn-small">+ Quick Add</a>
+                        </div>
+                    </div>
+                    <div style="background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px;">
+                        <div>
+                            <h3 style="margin: 0 0 6px 0; font-size: 1.05rem;">Play video to TV</h3>
+                            <p style="margin: 0; font-size: 0.85rem; color: var(--text-secondary);">Play a video on a UPnP renderer on the network, like your TV.</p>
+                        </div>
+                        <div class="actions right">
+                            <a href="/play-to" class="btn primary btn-small">▶ Play To</a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section class="card">
                 <h2>System Overview</h2>
                 <h4>Network Status</h4>
@@ -221,7 +251,7 @@
                     <div id="settings-form-container">
                         <p class="placeholder">Loading settings...</p>
                     </div>
-                    <div class="actions margin-top">
+                    <div class="actions right margin-top">
                         <button type="submit" class="btn primary">Save System Settings</button>
                     </div>
                 </form>
@@ -234,9 +264,9 @@
                 <h2>Raw Config Editor (yt-dlna.conf)</h2>
                 <p class="card-desc"><strong>For experienced users only:</strong> Directly edit and save the configuration file (INI syntax), see in-line documentation for details. Comments and custom formatting are preserved.</p>
                 <div class="form-group">
-                    <textarea id="config-editor" rows="18" class="code-editor" placeholder="Loading configuration..."></textarea>
+                    <textarea id="config-editor" rows="20" class="code-editor" placeholder="Loading configuration..."></textarea>
                 </div>
-                <div class="actions">
+                <div class="actions right margin-top">
                     <button class="btn primary" id="btn-save-config">Save Raw Configuration</button>
                 </div>
             </section>

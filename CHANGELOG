@@ -11,7 +11,7 @@
 - New: "View Playlist" page now shows more information, offers direct "Play to" links, and allows for deleting items
 - Improved: Faster startup of ffmpeg remux process
 - Improved: New default DASH format selector for YouTube, fixing URLs not being resolved on multi-language videos (automatically updated in configuration if not customized)
-- Improved: The UDN UUID for the DLNA server is now auto-generated on first run instead of being hard-coded in dlna_server.py.
+- Improved: The UDN UUID for the DLNA server is now auto-generated on first run instead of being hard-coded in dlna_server.py
 - Improved: "View Playlist" is now implemented as a separate HTML asset instead of inside dashboard.py, making the code more maintainable
 - Improved: Many improvements to Web UI, especially to mobile views
 - Fixed: Using "View Playlist" on an empty Custom Playlist, immediately after creating it, returned HTTP 500

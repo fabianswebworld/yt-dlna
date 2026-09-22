@@ -246,6 +246,55 @@ def run_sync(targets=None):
             utils.log(_LOG_SRC, f"Playlist '{folder_name}' synchronized.", type='S')
             utils.get_library(force_reload=True)
 
+    # --- proactively pre-cache resolving items in enabled custom playlists
+    if precache_enabled:
+        custom_reg = utils.get_custom_playlists_registry()
+        for reg in custom_reg:
+            if not reg.get('enabled', True):
+                continue
+
+            cpl_name = reg['name']
+            is_targeted = target_list and (cpl_name.lower() in target_list)
+
+            if not (is_targeted or (is_sync_all and reg.get('precache', False))):
+                continue
+
+            file_path = os.path.join(utils.CONFIG_DIR, reg['file'])
+            if not os.path.exists(file_path):
+                continue
+
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    cpl_data = json.loads(content) if content else []
+
+                nodes_to_check = cpl_data if isinstance(cpl_data, list) else cpl_data.get('children', [])
+                root_mode = (cpl_data.get('mode') if isinstance(cpl_data, dict) else None) or 'default'
+                resolving_modes = {'default', 'redirect', 'proxy', 'remux', 'remux_mp4', 'remux_ts'}
+
+                items_by_service = {}
+
+                def collect_resolving(nodes, current_mode):
+                    for n in nodes:
+                        if n.get('type') == 'folder':
+                            collect_resolving(n.get('children', []), n.get('mode') or current_mode)
+                        else:
+                            item_mode = n.get('mode') or current_mode
+                            if item_mode in resolving_modes and n.get('url'):
+                                srv = n.get('service') or 'auto'
+                                items_by_service.setdefault(srv, []).append(n['url'])
+
+                collect_resolving(nodes_to_check, root_mode)
+
+                if items_by_service:
+                    utils.log(_LOG_SRC, f"Pre-caching Custom Playlist '{cpl_name}'...", "cache")
+                    for srv, urls in items_by_service.items():
+                        proxy.resolve_cdn_urls_batch(urls, service_name=srv, min_remaining_ttl=global_interval)
+                    utils.log(_LOG_SRC, f"CDN URL cache updated for Custom Playlist '{cpl_name}'.", "cache", type='S')
+
+            except Exception as e:
+                utils.log(_LOG_SRC, f"Error pre-caching Custom Playlist '{cpl_name}': {e}", "cache", level=1, type='E')
+
     if is_sync_all:
         utils.log(_LOG_SRC, "All playlists synchronized.", type='S')
         if precache_enabled:

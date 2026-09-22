@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>yt-dlna - Quick Add to Playlist</title>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .quick-add-form { display: flex; flex-direction: column; gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 0.85rem; color: var(--text-secondary); }
+        .form-row { display: flex; gap: 10px; }
+        .expert-toggle { font-size: 0.85rem; color: var(--accent-primary); cursor: pointer; user-select: none; margin-top: 4px; }
+        .expert-panel { display: none; flex-direction: column; gap: 10px; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; }
+        .expert-panel.open { display: flex; }
+        .items-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+        .item-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; }
+        .item-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+        .item-title { font-weight: 500; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        .item-sub { font-size: 0.75rem; color: var(--text-secondary); }
+        .btn-icon { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 4px; border-radius: 4px; }
+        .btn-icon:hover { background: rgba(255,255,255,0.1); }
+        #btn-submit { margin-top: 8px; align-self: flex-end; }
+        #items-playlist-card { margin-top: 16px; }
+        @media (max-width: 600px) { #btn-submit { align-self: stretch; width: 100%; } }
+    </style>
+</head>
+<body class="playlist-page">
+    <div class="container">
+        <header class="header">
+            <div class="brand">
+                <img src="/icon.png" alt="yt-dlna Logo" class="logo">
+                <div>
+                    <h1 id="page-title">Quick Add to Playlist</h1>
+                    <p class="subtitle"><strong>yt-dlna</strong> &#8226; Add video or stream URL to a Custom Playlist</p>
+                </div>
+            </div>
+            <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
+                <div class="actions">
+                    <button type="button" class="btn btn-small secondary" onclick="goBack()">Back to Dashboard</button>
+                </div>
+            </div>
+        </header>
+
+        <section class="card">
+            <form id="add-form" class="quick-add-form">
+                <div class="form-group">
+                    <label for="video-url">Add this video:</label>
+                    <input type="text" id="video-url" class="input" placeholder="e.g. https://www.youtube.com/watch?v=..." required autofocus>
+                </div>
+
+                <div class="form-group">
+                    <label for="playlist-select">To this playlist:</label>
+                    <div id="no-playlist-banner" class="badge-blue" style="display: none; margin-left: 0px; padding: 12px; border: 1px solid var(--accent-blue); border-radius: 6px; margin-bottom: 6px;">
+                        <p style="margin: 0 0 8px 0; font-size: 0.8rem; color: var(--text-primary);">There are no Custom Playlists available. You can create one right now by clicking the button below.</p>
+                        <button type="button" class="btn primary btn-small" id="btn-create-watch-later">+ Create Custom Watch Later Playlist</button>
+                    </div>
+                    <select id="playlist-select" class="input" required></select>
+                </div>
+
+                <div class="expert-toggle" id="expert-toggle">▼ Show advanced options</div>
+
+                <div class="expert-panel" id="expert-panel">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="video-title">Custom display title (optional)</label>
+                            <input type="text" id="video-title" class="input" placeholder="leave empty to automatically fetch video title">
+                        </div>
+                    </div class="form-row">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="service-select">Service</label>
+                            <select id="service-select" class="input">
+                                <option value="auto" selected>auto (auto-detect service)</option>
+                                <option value="youtube">youtube</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="mode-select">Proxy Mode</label>
+                            <select id="mode-select" class="input">
+                                <option value="" selected>Inherit from playlist root</option>
+                                <optgroup label="resolving modes (CDN target URL)">
+                                    <option value="default">default (configured default proxy mode)</option>
+                                    <option value="redirect">redirect (HTTP 302 to CDN URL)</option>
+                                    <option value="proxy">proxy (tunnel from CDN URL)</option>
+                                    <option value="remux">remux (force remux, configured format)</option>
+                                    <option value="remux_ts">remux_ts (force remux to MPEG-TS)</option>
+                                    <option value="remux_mp4">remux_mp4 (force remux to MPEG-TS)</option>
+                                    <option value="no-remux">no-remux (default proxy mode, never remux)</option>
+                                    <option value="redirect-no-remux">redirect-no-remux ('redirect' mode, never remux)</option>
+                                    <option value="proxy-no-remux">proxy-no-remux ('proxy' mode, never remux)</option>
+                                </optgroup>
+                                <optgroup label="non-resolving modes (static target URL)">
+                                    <option value="direct">direct (source URL)</option>
+                                    <option value="bounce">bounce (HTTP 302 to source URL)</option>
+                                    <option value="reflect">reflect (tunnel from source URL)</option>
+                                    <option value="hit">hit (action trigger, stream dummy file)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn primary" id="btn-submit">+ Add to Playlist</button>
+            </form>
+        </section>
+
+        <section class="playlist-card collapsed" id="items-playlist-card">
+            <div class="playlist-card-header">
+                <div class="playlist-title-group" onclick="togglePlaylistCard(this)">
+                    <span class="chevron">▲</span>
+                    <h3 style="margin: 0; font-size: 1rem;">Items currently in playlist (<span id="item-count">0</span>)</h3>
+                </div>
+                <div class="actions">
+                    <a id="full-editor-link" href="/playlists/custom/edit" class="btn btn-small secondary" style="font-size: 0.75rem;">Open in Custom Playlist Editor</a>
+                </div>
+            </div>
+            <div class="playlist-card-body">
+                <div class="card-body-content">
+                    <ul id="items-list" class="items-list">
+                        <li class="placeholder">Loading playlist items...</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        let currentPlaylist = "";
+
+        // extract playlist name from path if accessed via /add-to/<name> or /add/<name>
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+        if (pathParts.length > 1 && !['add', 'add-to'].includes(pathParts[pathParts.length - 1])) {
+            currentPlaylist = decodeURIComponent(pathParts.slice(1).join('/'));
+        }
+
+        const expertToggle = document.getElementById('expert-toggle');
+        const expertPanel = document.getElementById('expert-panel');
+        expertToggle.addEventListener('click', () => {
+            expertPanel.classList.toggle('open');
+            expertToggle.textContent = expertPanel.classList.contains('open') ? '▲ Hide advanced options' : '▼ Show advanced options';
+        });
+
+        const themeBtn = document.getElementById('btn-theme-toggle');
+        if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+        async function createDefaultWatchLater() {
+            const btn = document.getElementById('btn-create-watch-later');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Creating...';
+            }
+            try {
+                const res = await fetch('/api/playlists/custom/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: 'Custom Watch Later',
+                        file: 'data/custom_watch_later.json',
+                        mode: 'default'
+                    })
+                });
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    alert('Error creating playlist: ' + data.message);
+                    return;
+                }
+
+                await fetch('/api/config/single', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        section: 'custom_playlists:Custom Watch Later',
+                        key: 'precache',
+                        value: 'yes'
+                    })
+                });
+
+                currentPlaylist = 'Custom Watch Later';
+                await loadPlaylists();
+            } catch (err) {
+                alert('Request failed: ' + err);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "+ Create Custom Watch Later Playlist";
+                }
+            }
+        }
+
+        const createPlBtn = document.getElementById('btn-create-watch-later');
+        if (createPlBtn) createPlBtn.addEventListener('click', createDefaultWatchLater);
+
+        async function loadPlaylists() {
+            try {
+                const res = await fetch('/api/playlists/custom');
+                const json = await res.json();
+                const sel = document.getElementById('playlist-select');
+                const banner = document.getElementById('no-playlist-banner');
+                const submitBtn = document.getElementById('btn-submit');
+                sel.innerHTML = '';
+
+                if (json.registry && json.registry.length > 0) {
+                    if (banner) banner.style.display = 'none';
+                    sel.style.display = '';
+                    sel.required = true;
+                    if (submitBtn) submitBtn.disabled = false;
+
+                    json.registry.forEach(r => {
+                        const opt = document.createElement('option');
+                        opt.value = r.name;
+                        opt.textContent = r.name;
+                        if (r.name === currentPlaylist) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+
+                    if (!currentPlaylist) {
+                        const precachedPl = json.registry.find(r => r.precache === true);
+                        currentPlaylist = precachedPl ? precachedPl.name : json.registry[0].name;
+                        sel.value = currentPlaylist;
+                    }
+                    updateEditorLink();
+                    loadItems();
+                } else {
+                    if (banner) banner.style.display = 'block';
+                    sel.innerHTML = '<option value="" disabled selected>No Custom Playlists available</option>';
+                    sel.style.display = '';
+                    sel.required = false;
+                    if (submitBtn) submitBtn.disabled = true;
+                    document.getElementById('item-count').textContent = '0';
+                    document.getElementById('items-list').innerHTML = '<li class="placeholder">No Custom Playlists available.</li>';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        document.getElementById('playlist-select').addEventListener('change', (e) => {
+            currentPlaylist = e.target.value;
+            updateEditorLink();
+            loadItems();
+        });
+
+        async function loadServices() {
+            try {
+                const res = await fetch('/api/config/parsed');
+                const json = await res.json();
+                const sel = document.getElementById('service-select');
+                sel.innerHTML = '<option value="auto" selected>auto (auto-detect service)</option>';
+
+                if (json.config && json.config.resolved_services) {
+                    Object.keys(json.config.resolved_services).forEach(s => {
+                        if (s !== 'auto' && s !== 'global') {
+                            const opt = document.createElement('option');
+                            opt.value = s;
+                            opt.textContent = s;
+                            sel.appendChild(opt);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to load services:', e);
+            }
+        }
+
+        async function loadItems() {
+            if (!currentPlaylist) return;
+            const listEl = document.getElementById('items-list');
+            try {
+                const res = await fetch(`/api/playlists/custom/data?name=${encodeURIComponent(currentPlaylist)}`);
+                const raw = await res.text();
+                const data = JSON.parse(raw || '[]');
+                const rootMode = data.mode || 'default';
+                const items = Array.isArray(data) ? data : (data.children || []);
+
+                document.getElementById('item-count').textContent = items.length;
+                listEl.innerHTML = '';
+
+                if (items.length === 0) {
+                    listEl.innerHTML = '<li class="placeholder">This playlist is currently empty.</li>';
+                    return;
+                }
+
+                items.forEach((item, idx) => {
+                    const li = document.createElement('li');
+                    li.className = 'item-row';
+                    const isFolder = item.type === 'folder' || Boolean(item.children);
+                    let titleHtml = '';
+                    let subHtml = '';
+
+                    if (isFolder) {
+                        const count = (item.children || []).length;
+                        titleHtml = `📁 ${item.name || 'Untitled Folder'}`;
+                        subHtml = `Folder (${count} ${count === 1 ? 'item' : 'items'})`;
+                        deleteBtn = ``
+                    } else {
+                        const effectiveMode = item.mode || `${rootMode} (inherited)`;
+                        titleHtml = item.name || item.url;
+                        subHtml = `${item.url} &#8226; <strong>${item.service || 'auto'}</strong> &#8226; <em>${effectiveMode}</em>`;
+                        deleteBtn = `<button class="btn danger btn-small btn-delete btn-icon" onclick="deleteItem(${idx})" title="Delete item" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; padding-bottom: 2px;"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
+                    }
+
+                    li.innerHTML = `
+                        <div class="item-info">
+                            <span class="item-title">${titleHtml}</span>
+                            <span class="item-sub" style="overflow-wrap: anywhere;">${subHtml}</span>
+                        </div>
+                        <div>
+                            ${deleteBtn}
+                        </div>
+                    `;
+                    listEl.appendChild(li);
+                });
+            } catch (e) {
+                listEl.innerHTML = '<li class="placeholder">Failed to load items.</li>';
+            }
+        }
+
+        // add item submit
+        document.getElementById('add-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pl = document.getElementById('playlist-select').value;
+            const url = document.getElementById('video-url').value.trim();
+            const name = document.getElementById('video-title').value.trim();
+            const service = document.getElementById('service-select').value;
+            const mode = document.getElementById('mode-select').value;
+
+            if (!pl || !url) return;
+
+            const submitBtn = document.getElementById('btn-submit');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+
+            try {
+                const res = await fetch('/api/playlists/custom/item/add', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ playlist: pl, url: url, name: name, service: service, mode: mode })
+                });
+                const json = await res.json();
+                if (json.status === 'success') {
+                    document.getElementById('video-url').value = '';
+                    document.getElementById('video-title').value = '';
+                    loadItems();
+                    document.getElementById('items-playlist-card').classList.remove('collapsed');
+                    if (!name) {
+                        setTimeout(loadItems, 2500);
+                        setTimeout(loadItems, 5000);
+                    }
+                } else {
+                    alert('Error: ' + json.message);
+                }
+            } catch (err) {
+                alert('Request failed: ' + err);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '+ Add to Playlist';
+            }
+        });
+
+        // delete item
+        async function deleteItem(index) {
+            if (!confirm('Remove this item from playlist?')) return;
+            try {
+                const res = await fetch('/api/playlists/custom/item/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ playlist: currentPlaylist, index: index })
+                });
+                const json = await res.json();
+                if (json.status === 'success') {
+                    loadItems();
+                } else {
+                    alert('Error: ' + json.message);
+                }
+            } catch (err) {
+                alert('Request failed: ' + err);
+            }
+        }
+
+        function updateEditorLink() {
+            const editorLink = document.getElementById('full-editor-link');
+            if (editorLink && currentPlaylist) {
+                editorLink.href = `/playlists/custom/edit?name=${encodeURIComponent(currentPlaylist)}`;
+            }
+        }
+
+        function togglePlaylistCard(element) {
+            const card = element.closest('.playlist-card');
+            if (card) { card.classList.toggle('collapsed'); }
+        }
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('yt-dlna-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeButtonText(savedTheme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('yt-dlna-theme', newTheme);
+            updateThemeButtonText(newTheme);
+        }
+
+        function updateThemeButtonText(theme) {
+            const btn = document.getElementById('btn-theme-toggle');
+            if (btn) btn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+
+        function goBack() {
+            if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
+                window.history.back();
+            } else {
+                window.location.href = '/playlists/custom';
+            }
+        }
+
+        initTheme();
+        loadPlaylists();
+        loadServices();
+    </script>
+</body>
+</html>

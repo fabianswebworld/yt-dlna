@@ -144,6 +144,9 @@ function initTabs() {
     };
 
     const switchTab = (path, updateHistory = true) => {
+        if (path.length > 1 && path.endsWith('/')) {
+            path = path.slice(0, -1);
+        }
         const route = routeMap[path] || routeMap['/'];
         const tabId = route.tab;
 
@@ -157,7 +160,8 @@ function initTabs() {
 
         // sub-tabs for playlist tab
         if (route.sub) {
-            switchSubTab(route.sub, false); // Don't update history again
+            // don't update history again
+            switchSubTab(route.sub, false);
         }
 
         // update browser history
@@ -169,7 +173,7 @@ function initTabs() {
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             const tabId = btn.getAttribute('data-tab');
-            // Find the first matching path for this tabId
+            // find the first matching path for this tabId
             const path = Object.keys(routeMap).find(p => routeMap[p].tab === tabId);
             switchTab(path);
         });
@@ -491,19 +495,21 @@ async function saveCustomCard(oldName) {
     const newName = document.getElementById(`cpl-rename-${oldName}`).value.trim();
     const newFile = document.getElementById(`cpl-path-${oldName}`).value.trim();
     
-    const isEnabled = card.querySelector('input[type="checkbox"]').checked;
-    const enabledVal = isEnabled ? 'yes' : 'no';
+    const enabledEl = card.querySelector('.header-controls input[type="checkbox"]');
+    const enabledVal = (enabledEl && enabledEl.checked) ? 'yes' : 'no';
+    const precacheEl = document.getElementById(`cpl-precache-${oldName}`);
+    const precacheVal = (precacheEl && precacheEl.checked) ? 'yes' : 'no';
 
     // handle potential rename
     if (newName !== oldName) {
         const success = await handleRename('custom', oldName, newName);
-        if (!success) { showToast("Rename failed. Check if name already exists, of new name is invalid or empty.", true); return; }
+        if (!success) { showToast("Rename failed. Check if name already exists, or if new name is invalid or empty.", true); return; }
     }
-
     const section = `custom_playlists:${newName}`;
 
     await setSingleConfig(section, 'playlist_file', newFile);
     await setSingleConfig(section, 'enabled', enabledVal);
+    await setSingleConfig(section, 'precache', precacheVal);
     
     showToast(`Saved changes for Custom Playlist '${newName}'.`);
     fetchCustomPlaylists();
@@ -722,7 +728,7 @@ function renderPlaylistsTab(configData) {
                                 <div class="field-row ${hasLimitOverride ? '' : 'disabled'}">
                                     <input type="checkbox" class="override-checkbox" onchange="toggleOverride(this)" ${hasLimitOverride ? 'checked' : ''}>
                                     <div class="field-content form-group">
-                                        <label>Individual item Limit</label>
+                                        <label>Individual item limit</label>
                                         <input type="number" id="pl-limit-${escapeJs(title)}" value="${hasLimitOverride ? opts.limit_items : globalOpts.limit_items}" min="0" oninput="markCardDirty(this.closest('.playlist-card'))" ${hasLimitOverride ? '' : 'disabled'}>
                                     </div>
                                 </div>
@@ -790,34 +796,40 @@ function renderCustomPlaylistsTab(registry) {
     if (!container) return;
 
     if (!registry || registry.length === 0) {
-        container.innerHTML = '<p class="placeholder">No custom playlists registered.</p>';
+        container.innerHTML = '<p class="placeholder">No Custom Playlists registered.</p>';
         return;
     }
 
     container.innerHTML = registry.map(reg => {
         const isEnabled = reg.enabled !== false;
+        const isPrecache = reg.precache === true;
         const viewUrl = `/playlist/custom/${encodeURIComponent(reg.name)}`;
+        const addUrl = `/add-to/${encodeURIComponent(reg.name)}`;
 
         return `
             <div class="playlist-card collapsed ${isEnabled ? '' : 'disabled-card'}" id="custom-card-${escapeJs(reg.name)}" ondragover="handleDragOver(event)">
                 <div class="playlist-card-header">
                     <div class="playlist-title-group" onclick="togglePlaylistCard(this)">
                         <span class="chevron">▲</span>
-                        <span class="playlist-title">${escapeHtml(reg.name)}</span>
+                        <span class="playlist-title">
+                            ${escapeHtml(reg.name)}
+                            ${isPrecache ? '<span class="badge badge-blue" title="CDN pre-resolving (Watch-Later mode) enabled">Watch Later</span>' : ''}
+                        </span>
                     </div>
                     <div class="header-controls">
-                        <label class="switch switch-small">
+                        <label class="switch switch-small" title="Enable/disable playlist">
                             <input type="checkbox" onchange="toggleCustomEnabled('${escapeJs(reg.name)}', this.checked)" ${isEnabled ? 'checked' : ''}>
                             <span class="slider"></span>
                         </label>
                         <div class="actions">
                             <a href="${viewUrl}" class="btn primary btn-small btn-view ${isEnabled ? '' : 'disabled'}">View</a>
                             <button class="btn secondary btn-small" onclick="openCustomEditor('${escapeJs(reg.name)}')">Edit</button>
+                            ${isPrecache ? `<a href="${addUrl}" class="btn secondary btn-small ${isEnabled ? '' : 'disabled'}" title="Quick-Add video to this playlist">+ Quick-Add</a> <button class="btn secondary btn-small ${isEnabled ? '' : 'disabled'}" onclick="triggerSync('${escapeJs(reg.name)}')" title="Pre-resolve all CDN links now"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; padding-bottom: 2px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>` : ''}
                             <button class="btn danger btn-small" onclick="openDeleteModal('custom', '${escapeJs(reg.name)}')" title="Delete" aria-label="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
                         </div>
                     </div>
                     <div class="drag-handle" draggable="true" ondragstart="handleDragStart(event)" ondragend="handleDragEnd(event)">⋮⋮</div>   
-             </div>
+                </div>
                 <div class="playlist-card-body">
                     <div class="card-body-content">
                         <div class="form-stack">
@@ -828,6 +840,18 @@ function renderCustomPlaylistsTab(registry) {
                             <div class="form-group">
                                 <label>JSON File Path</label>
                                 <input type="text" id="cpl-path-${escapeJs(reg.name)}" value="${escapeHtml(reg.file)}" oninput="markCardDirty(this.closest('.playlist-card'))">
+                            </div>
+                            <div class="form-group" style="margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border, rgba(255,255,255,0.08));">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div>
+                                        <label style="margin: 0; font-weight: 500; cursor: pointer;" for="cpl-precache-${escapeJs(reg.name)}">Enable CDN URL pre-resolving and Quick-Add (Watch Later mode)</label>
+                                        <p style="margin: 2px 0 0 0; font-size: 0.7rem; color: var(--text-secondary);">Proactively resolves CDN stream links in the background for items which use dynamic proxy modes. This enables you to use this playlist as a locally-curated, multi-service 'Watch Later' list (think of it as a hybrid mode between an Online Playlist and a Custom Playlist). Use the 'Quick-Add' feature to quickly add new videos to that list, or to remove the ones you already watched.</p>
+                                    </div>
+                                    <label class="switch switch-small" style="flex-shrink: 0; margin-left: 14px;">
+                                        <input type="checkbox" id="cpl-precache-${escapeJs(reg.name)}" ${isPrecache ? 'checked' : ''} onchange="markCardDirty(this.closest('.playlist-card'))">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                         <div class="actions margin-top" style="justify-content: flex-end;">
@@ -1241,13 +1265,13 @@ function renderSettingsForm(configData) {
                 <div class="form-group">
                     <label>Default Proxy URL pattern</label>
                     <input type="text" name="proxy.proxy_url_pattern" value="${escapeHtml(proxy.proxy_url_pattern || '/play/{service}/{video_id}')}">
-                    <p class="card-desc"><strong>Note:</strong> Additional proxy routes are available and can be customized manually in the configuration file.</p>
+                    <p class="card-desc margin-top">Additional proxy routes are available and can be customized manually in the configuration file.</p>
                 </div>
                 <div class="form-group">
                     <label>Default operating mode</label>
                     <select name="proxy.mode">
                         <option value="redirect" ${proxy.mode === 'redirect' ? 'selected' : ''}>redirect (HTTP 302)</option>
-                        <option value="proxy" ${proxy.mode === 'proxy' ? 'selected' : ''}>proxy (Byte Tunneling)</option>
+                        <option value="proxy" ${proxy.mode === 'proxy' ? 'selected' : ''}>proxy (Byte tunneling)</option>
                     </select>
                 </div>
                 <div class="switch-container margin-top">
@@ -1298,8 +1322,43 @@ function renderSettingsForm(configData) {
                     <input type="text" name="dlna.friendly_name" value="${escapeHtml(dlna.friendly_name || 'yt-dlna Media Server')}">
                 </div>
                 <div class="form-group">
-                    <label>Icon Path</label>
+                    <label>Icon path</label>
                     <input type="text" name="dlna.icon" value="${escapeHtml(dlna.icon || 'assets/yt-dlna.png')}">
+                </div>
+                <div class="form-group">
+                    <label>DLNA Server UDN (Unique Device Name)</label>
+                    <input type="text" name="dlna.uuid" value="${escapeHtml(dlna.uuid || '')}">
+                    <p class="card-desc margin-top">To auto-generate a new unique ID, clear the above field and restart the daemon.</p>
+                </div>
+                <div class="switch-container margin-top">
+                    <span class="switch-label">Enable MediaRenderer discovery (Play To)</span>
+                    <label class="switch">
+                        <input type="checkbox" name="dlna.enable_renderer_discovery" ${dlna.enable_renderer_discovery !== 'no' ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Default renderer</label>
+                    <select name="dlna.default_renderer" id="dlna-default-renderer">
+                        <option value="">auto (first available or last used)</option>
+                    </select>
+                    <p class="card-desc margin-top">This renderer is used as the default target for "Play To".</p>
+                </div>
+                <div class="switch-container margin-top">
+                    <span class="switch-label">Enable DIAL server (Cast-to-UPnP bridge)</span>
+                    <label class="switch">
+                        <input type="checkbox" name="dlna.enable_dial_server" ${dlna.enable_dial_server !== 'no' ? 'checked' : ''}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>DIAL server display name</label>
+                    <input type="text" name="dlna.dial_friendly_name" value="${escapeHtml(dlna.dial_friendly_name || 'yt-dlna Media Renderer')}">
+                </div>
+                <div class="form-group">
+                    <label>DIAL Screen ID</label>
+                    <input type="text" name="dlna.dial_screen_id" value="${escapeHtml(dlna.dial_screen_id || '')}">
+                    <p class="card-desc margin-top">To auto-generate a new unique ID, clear the above field and restart the daemon.</p>
                 </div>
             </div>
         </div>
@@ -1375,6 +1434,37 @@ function renderSettingsForm(configData) {
             </div>
         </div>
     `;
+
+    // asynchronously populate default renderers from /api/renderers
+    const rendererSelect = document.getElementById('dlna-default-renderer');
+    if (rendererSelect) {
+        const savedDefault = dlna.default_renderer || '';
+        fetch('/api/renderers')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success' && data.renderers) {
+                    let foundSaved = false;
+                    data.renderers.forEach(r => {
+                        const opt = document.createElement('option');
+                        opt.value = r.udn || r.name;
+                        opt.textContent = `${r.name} (${r.ip || 'LAN'})`;
+                        if (opt.value === savedDefault || r.name === savedDefault) {
+                            opt.selected = true;
+                            foundSaved = true;
+                        }
+                        rendererSelect.appendChild(opt);
+                    });
+                    if (savedDefault && !foundSaved) {
+                        const opt = document.createElement('option');
+                        opt.value = savedDefault;
+                        opt.textContent = `${savedDefault} (offline, saved)`;
+                        opt.selected = true;
+                        rendererSelect.appendChild(opt);
+                    }
+                }
+            })
+            .catch(() => {});
+    }
 }
 
 async function saveParsedSettings(e) {
@@ -1566,7 +1656,7 @@ async function fetchCustomPlaylists() {
         if (data.status === 'success') {
             renderCustomPlaylistsTab(data.registry);
         } else {
-            console.error("Failed to fetch custom playlists: ", data.message);
+            console.error("Failed to fetch Custom Playlists: ", data.message);
         }
     } catch (err) {
         console.error("Error communicating with server: ", err);

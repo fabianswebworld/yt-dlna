@@ -26,7 +26,7 @@ def sync_loop():
     import sync
 
     time.sleep(5)
-    utils.log(_LOG_SRC, "Sync scheduler active.", "scheduler")
+    utils.log(_LOG_SRC, "Sync scheduler initialized.", "scheduler")
 
     while True:
         if sync.is_busy():
@@ -132,6 +132,46 @@ def main():
     if not args.serve and args.sync is None:
         sys.exit(0)
 
+    # auto-migrate old format_dash selectors and add auto service
+    if args.serve or args.sync is not None:
+        config = utils.load_config()
+        old_dash = "(137/136/135)+140"
+        new_dash = "bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]"
+        dash_replaced = False
+        for section in config.sections():
+            if section == 'services' or section.startswith('services:'):
+                if config.get(section, 'format_dash', fallback='').strip() == old_dash:
+                    utils.update_config_single_key(section, 'format_dash', new_dash)
+                    dash_replaced = True
+
+        if dash_replaced:
+            utils.log(_LOG_SRC, "Upgrade notice: Replaced old format_dash selectors with new selector.", "init", type='S')
+            config = utils.load_config(force_reload=True)
+
+        if not config.has_section('services:auto'):
+            utils.update_config_single_key('services:auto', 'format_dash', new_dash)
+            utils.update_config_single_key('services:auto', 'cache_ttl', '18000')
+            utils.update_config_single_key('services:auto', 'title_format', '{index}. {channel}: {title} ({duration})')
+
+            existing_services = [s.replace('services:', '') for s in config.sections() if s.startswith('services:')]
+            reordered = ['auto'] + [s for s in existing_services if s != 'auto']
+            utils.reorder_config_sections('services', reordered)
+
+            utils.log(_LOG_SRC, "Upgrade notice: Created 'auto' service profile.", "init", type='S')
+            config = utils.load_config(force_reload=True)
+
+        if config.get('playlists', 'default_service', fallback='').strip().lower() == 'youtube':
+            utils.update_config_single_key('playlists', 'default_service', 'auto')
+            pinned_count = 0
+            for sec in config.sections():
+                if sec.startswith('playlists:'):
+                    if 'service' not in config[sec]:
+                        utils.update_config_single_key(sec, 'service', 'youtube')
+                        pinned_count += 1
+
+            utils.log(_LOG_SRC, f"Upgrade notice: Changed default_service from 'youtube' to 'auto' and updated {pinned_count} playlist(s).", "init", type='S')
+            config = utils.load_config(force_reload=True)
+
     # execute immediate/startup sync if requested
     if args.sync is not None:
         import sync
@@ -182,7 +222,7 @@ def main():
         if config.getboolean('sync', 'enable_sync', fallback=True):
             sync_thread = threading.Thread(target=sync_loop, daemon=True)
             sync_thread.start()
-            utils.log(_LOG_SRC, "Background scheduler thread armed.", "init")
+            utils.log(_LOG_SRC, "Background scheduler thread active.", "init")
         else:
             utils.log(_LOG_SRC, "Scheduled sync disabled in configuration.", "init")
 

@@ -19,7 +19,7 @@ import yt_dlp
 import queue
 from collections import deque
 
-__version__ = "1.3.0-dev"
+__version__ = "1.3.0"
 
 # step up one level to application root where config and data folders reside
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -635,7 +635,8 @@ def get_custom_playlists_registry():
             registry.append({
                 'name': name,
                 'enabled': config.getboolean(section, 'enabled', fallback=True),
-                'file': config.get(section, 'playlist_file', fallback='').strip()
+                'file': config.get(section, 'playlist_file', fallback='').strip(),
+                'precache': config.getboolean(section, 'precache', fallback=False)
             })
     return registry
 
@@ -777,7 +778,15 @@ def replace_save_json(file_path, data, indent=4):
             json.dump(data, f, indent=indent, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, file_path)
+        for attempt in range(15):
+            try:
+                os.replace(tmp_path, file_path)
+                return True
+            except (PermissionError, OSError):
+                if attempt < 14:
+                    time.sleep(0.1)
+                else:
+                    raise
         return True
     except Exception as e:
         log("utils", f"Save failed for {file_path}: {e}", level=1, type='E')

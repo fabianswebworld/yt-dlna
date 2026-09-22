@@ -1,3 +1,8 @@
+/* ==============================================================================
+ * yt-dlna: assets/html/editor.js
+ * API interactions and tree editor UI functions for Custom Playlist Editor
+ * ============================================================================== */
+
 let playlistName = new URLSearchParams(window.location.search).get('name');
 let treeData = { mode: 'bounce', children: [] };
 let activeNode = null;

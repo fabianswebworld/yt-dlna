@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>yt-dlna - Playlist View</title>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .action-btn-link { background: none; border: none; padding: 0; font-family: inherit; font-size: inherit; cursor: pointer; }
+        .playlist-view-item { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+        .playlist-view-item .item-main { width: 100% !important; white-space: normal !important; }
+        .playlist-view-item .item-main a { font-size: 1.0rem !important; }
+        .playlist-view-item .item-actions { font-size: 1.0rem !important; margin-left: 0 !important; width: 100% !important; justify-content: flex-end !important; flex-wrap: wrap !important; white-space: normal !important; row-gap: 6px !important; }
+        .playlist-view-item .item-actions a { font-size: 0.9rem !important; }
+        .playlist-folder-card { font-size: 0.9rem !important; padding: 10px 14px !important; }
+        .btn-icon { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 4px; border-radius: 4px; }
+        .btn-icon:hover { background: rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body class="playlist-page">
+    <div class="container">
+        <div id="toast" class="toast hidden"></div>
+
+        <header class="header">
+            <div class="brand">
+                <img src="/icon.png" alt="yt-dlna Logo" class="logo">
+                <div>
+                    <h1 id="playlist-title">Loading playlist...</h1>
+                    <p class="subtitle"><strong>yt-dlna</strong> &#8226; <span id="playlist-subtitle">Playlist View</span></p>
+                </div>
+            </div>
+            <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
+                <div class="actions">
+                    <button class="btn btn-small secondary" onclick="goBack()">Back to Dashboard</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Items Card -->
+        <section class="card">
+            <ul class="playlist-view-list" id="playlist-items-list">
+                <li class="placeholder">Loading playlist items...</li>
+            </ul>
+        </section>
+    </div>
+
+    <script>
+        let playlistName = "";
+        let playlistType = "online";
+        let baseUrl = "";
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('yt-dlna-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeButtonText(savedTheme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('yt-dlna-theme', newTheme);
+            updateThemeButtonText(newTheme);
+        }
+
+        function updateThemeButtonText(theme) {
+            const btn = document.getElementById('btn-theme-toggle');
+            if (btn) btn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+
+        const themeBtn = document.getElementById('btn-theme-toggle');
+        if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+        function goBack() {
+            if (document.referrer && new URL(document.referrer).origin === window.location.origin) {
+                window.history.back();
+            } else {
+                window.location.href = playlistType === 'custom' ? '/playlists/custom' : '/playlists/online';
+            }
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast visible ${isError ? 'error' : 'success'}`;
+            setTimeout(() => {
+                toast.className = 'toast exit';
+                setTimeout(() => { toast.className = 'toast hidden'; }, 400);
+            }, 3000);
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        async function playToDefault(targetUrl, service, mode, title) {
+            showToast(`Connecting to TV: "${title || targetUrl}"...`);
+            try {
+                const res = await fetch('/api/play-to', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: targetUrl,
+                        renderer: 'default-renderer',
+                        service: service || 'auto',
+                        mode: mode || 'default'
+                    })
+                });
+                const json = await res.json();
+                if (json.status === 'success') {
+                    showToast(`▶️ Playing on "${json.data?.renderer || 'TV'}"!`);
+                } else {
+                    showToast(`Error: ${json.message}`, true);
+                }
+            } catch (err) {
+                showToast(`Network Error: ${err}`, true);
+            }
+        }
+
+        async function deleteItem(index) {
+            if (!confirm('Remove this item from playlist?')) return;
+            try {
+                const res = await fetch('/api/playlists/custom/item/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ playlist: playlistName, index: index })
+                });
+                const json = await res.json();
+                if (json.status === 'success') {
+                    showToast('Item deleted successfully.');
+                    loadPlaylistData();
+                } else {
+                    showToast(`Error: ${json.message}`, true);
+                }
+            } catch (err) {
+                showToast(`Request failed: ${err}`, true);
+            }
+        }
+
+        function buildActionsHtml(targetUrl, service, mode, proxyUrl, downloadUrl, webUrl, title) {
+            const safeTarget = encodeURIComponent(targetUrl);
+            let playToPath = '/play-to';
+            const isCustomMode = mode && mode !== 'default' && mode !== 'play';
+            const isCustomService = service && service !== 'auto';
+
+            if (isCustomMode) playToPath += `/${mode.replace('_', '/')}`;
+            if (isCustomService) playToPath += `/${service}`;
+            playToPath += `/${safeTarget}`;
+
+            const safeTitleJs = escapeHtml(title || '').replace(/'/g, "\\'");
+
+            return `
+                <div class="item-actions">
+                    <a href="${proxyUrl}" class="action-link" target="_blank" title="Play (with selected proxy mode)">Play</a>
+                    <span class="sep">|</span>
+                    <a href="${playToPath}" onclick="event.preventDefault(); playToDefault('${targetUrl}', '${service}', '${mode}', '${safeTitleJs}')" class="action-link" title="Play on default UPnP renderer">Play to TV</a>
+                    <span class="sep">|</span>
+                    <a href="${playToPath}" class="action-link" target="_blank" title="Play on any UPnP renderer">Play to...</a>
+                    <span class="sep">|</span>
+                    <a href="${downloadUrl || proxyUrl}" class="action-link" target="_blank" title="Proxy redirect to CDN URL, right-click to 'Save as...'">Download</a>
+                    <span class="sep">|</span>
+                    <a href="${webUrl || targetUrl}" class="action-link" target="_blank" title="View original video webpage">Web Page</a>
+                </div>
+            `;
+        }
+
+        function renderCustomHierarchy(nodes, parentMode, isRoot = true) {
+            if (!nodes || nodes.length === 0) return '';
+            let html = '';
+            const resolvingModes = ['default', 'redirect', 'proxy', 'remux', 'remux_mp4', 'remux_ts', 'no-remux', 'redirect-no-remux', 'proxy-no-remux'];
+
+            nodes.forEach((node, idx) => {
+                const name = escapeHtml(node.name || node.url || 'Untitled');
+                const targetUrl = node.url || '';
+                const safeTarget = encodeURIComponent(targetUrl);
+                const mode = node.mode || parentMode || 'default';
+                const service = node.service || 'auto';
+
+                if (node.type === 'folder') {
+                    html += `<div class="playlist-folder-card">📁 ${name}</div>`;
+                    html += `<div class="hierarchy-level">${renderCustomHierarchy(node.children || [], mode, false)}</div>`;
+                } else {
+                    let proxyUrl = '';
+                    let downloadUrl = '';
+                    let actionsHtml = '';
+                    const effectiveMode = node.mode ? mode : `${mode} (inherited)`;
+
+                    if (resolvingModes.includes(mode)) {
+                        if (mode === 'default') proxyUrl = `${baseUrl}/play/${service}/${safeTarget}`;
+                        else if (mode === 'remux_mp4') proxyUrl = `${baseUrl}/remux/mp4/${service}/${safeTarget}`;
+                        else if (mode === 'remux_ts') proxyUrl = `${baseUrl}/remux/ts/${service}/${safeTarget}`;
+                        else proxyUrl = `${baseUrl}/${mode}/${service}/${safeTarget}`;
+                        downloadUrl = `${baseUrl}/redirect/${service}/${safeTarget}`;
+                        actionsHtml = buildActionsHtml(targetUrl, service, mode, proxyUrl, downloadUrl, targetUrl, node.name);
+                    } else if (mode === 'direct') {
+                        proxyUrl = targetUrl;
+                        downloadUrl = targetUrl;
+                        actionsHtml = `<div class="item-actions"><a href="${targetUrl}" class="action-link" target="_blank">Play</a></div>`;
+                    } else {
+                        proxyUrl = `${baseUrl}/${mode}/${safeTarget}`;
+                        downloadUrl = targetUrl;
+                        const reflectUrl = `${baseUrl}/reflect/${safeTarget}`;
+                        actionsHtml = `
+                            <div class="item-actions">
+                                <a href="${reflectUrl}" class="action-link" target="_blank" title="Play (reflected via proxy)">Play</a>
+                                <span class="sep">|</span>
+                                <a href="${targetUrl}" class="action-link" target="_blank" title="Source URL">Download</a>
+                            </div>`;
+                    }
+
+                    const deleteBtn = isRoot ? `
+                        <div style="margin-left: auto; padding-left: 12px;">
+                            <button class="btn danger btn-small btn-icon" onclick="deleteItem(${idx})" title="Delete item">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; padding-bottom: 2px;"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                        </div>
+                    ` : '';
+
+                    html += `
+                        <div class="playlist-view-item">
+                            <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <div class="item-info" style="width: 100%;">
+                                        <div class="item-title" style="margin-bottom: 4px;">${name}</div>
+                                        <div class="item-sub" style="color: var(--text-secondary); font-size: 0.75rem; overflow-wrap: anywhere;">${escapeHtml(targetUrl)} &#8226; <strong>${escapeHtml(service)}</strong> &#8226; <em>${escapeHtml(effectiveMode)}</em></div>
+                                    </div>
+                                    ${deleteBtn}
+                                </div>
+                                ${actionsHtml}
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            return html;
+        }
+
+        // load playlist data and render list
+        async function loadPlaylistData() {
+            const listEl = document.getElementById('playlist-items-list');
+
+            const path = window.location.pathname;
+            if (path.includes('/playlist/custom/')) {
+                playlistType = 'custom';
+                playlistName = decodeURIComponent(path.replace('/playlist/custom/', ''));
+            } else if (path.includes('/playlist/online/')) {
+                playlistType = 'online';
+                playlistName = decodeURIComponent(path.replace('/playlist/online/', ''));
+            } else {
+                playlistName = decodeURIComponent(path.replace('/playlist/', ''));
+            }
+
+            document.getElementById('playlist-title').textContent = playlistName;
+            document.title = `yt-dlna - ${playlistName} - Playlist View`;
+            document.getElementById('playlist-subtitle').textContent = `${playlistType === 'custom' ? 'Custom' : 'Online'} Playlist View`;
+
+            try {
+                const res = await fetch(`/api/playlist/view-data?name=${encodeURIComponent(playlistName)}&type=${playlistType}`);
+                const data = await res.json();
+
+                if (data.status !== 'success') {
+                    listEl.innerHTML = `<li class="placeholder">Error: ${escapeHtml(data.message)}</li>`;
+                    return;
+                }
+
+                baseUrl = data.base_url || '';
+
+                if (data.type === 'custom') {
+                    const nodes = data.children || [];
+                    const renderedTree = renderCustomHierarchy(nodes, data.root_mode);
+                    listEl.innerHTML = renderedTree || '<li class="placeholder">This playlist is empty.</li>';
+                } else {
+                    // online flat list
+                    const items = data.items || [];
+                    if (items.length === 0) {
+                        listEl.innerHTML = '<li class="placeholder">This playlist is empty.</li>';
+                        return;
+                    }
+
+                    listEl.innerHTML = items.map(item => `
+                        <div class="playlist-view-item">
+                            <div class="item-main">
+                                <a href="${item.proxy_url}" target="_blank" title="Play (with selected proxy mode)">${escapeHtml(item.title)}</a>
+                            </div>
+                            ${buildActionsHtml(item.id, item.service, 'default', item.proxy_url, item.download_url, item.web_url, item.title)}
+                        </div>
+                    `).join('');
+                }
+            } catch (err) {
+                listEl.innerHTML = `<li class="placeholder">Failed to load playlist data: ${escapeHtml(err.message)}</li>`;
+            }
+        }
+
+        initTheme();
+        loadPlaylistData();
+    </script>
+</body>
+</html>

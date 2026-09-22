@@ -59,20 +59,27 @@ def _normalize_video_url(video_id, extractor=None):
         return f"https://www.youtube.com/watch?v={video_id}"
     return video_id
 
-def resolve_cdn_url(video_id, service_name='auto', min_remaining_ttl=0, force_dash=False):
+def resolve_cdn_url(video_id, service_name='auto', min_remaining_ttl=0, force_dash=False, force_no_dash=False):
     """Helper to fetch URL or DASH formats from cache or extract fresh via yt-dlp."""
     video_id = urllib.parse.unquote(video_id)
     config = utils.load_config()
     srv_cfg = utils.get_service_config(service_name)
 
-    # overrides for /remux/ route
-    enable_remux = True if force_dash else config.getboolean('proxy', 'enable_remux', fallback=False)
+    # overrides for /remux/ or /*no-remux/ routes
+    if force_no_dash:
+        enable_remux = False
+    elif force_dash:
+        enable_remux = True
+    else:
+        enable_remux = config.getboolean('proxy', 'enable_remux', fallback=False)
+
     remux_threshold = 0 if force_dash else config.getint('proxy', 'remux_threshold', fallback=0)
 
     cached_entry = utils.get_cached_url(video_id, service_name=service_name, min_remaining_ttl=min_remaining_ttl)
     if cached_entry:
-        # if we specifically forced DASH but the cache is a single URL, re-resolve
-        if not (force_dash and not cached_entry.get('is_dash')):
+        # if forced DASH but cached is single URL, OR if forced no-remux but cached is DASH, re-resolve
+        cache_invalid = (force_dash and not cached_entry.get('is_dash')) or (force_no_dash and cached_entry.get('is_dash'))
+        if not cache_invalid:
             utils.log(_LOG_SRC, f"Cache HIT for {service_name}:{utils.short(video_id)}", level=-3, type='S')
             utils.log(_LOG_SRC, f"Cache HIT for {service_name}:{video_id}", level=4, type='S')
             return cached_entry, True
@@ -134,14 +141,15 @@ def resolve_cdn_url(video_id, service_name='auto', min_remaining_ttl=0, force_da
             entry = {
                 'is_dash': True,
                 'video_url': v_url,
-                'audio_url': a_url
+                'audio_url': a_url,
+                'title': info.get('title')
             }
             utils.set_cached_url(video_id, entry, service_name=service_name)
             return entry, False
 
     # fallback: single-file progressive MP4
     cdn_url = info.get('url')
-    entry = {'url': cdn_url, 'is_dash': False}
+    entry = {'url': cdn_url, 'title': info.get('title'), 'is_dash': False}
     utils.set_cached_url(video_id, entry, service_name=service_name)
     return entry, False
 
@@ -254,7 +262,8 @@ def resolve_cdn_urls_batch(video_ids, service_name='auto', min_remaining_ttl=0):
                     entry = {
                         'is_dash': True,
                         'video_url': v_url,
-                        'audio_url': a_url
+                        'audio_url': a_url,
+                        'title': info.get('title')
                     }
                     results[target_id] = entry
                     utils.set_cached_url(target_id, entry, service_name=service_name)
@@ -263,7 +272,7 @@ def resolve_cdn_urls_batch(video_ids, service_name='auto', min_remaining_ttl=0):
             # single-file fallback
             cdn_url = info.get('url')
             if cdn_url:
-                entry = {'url': cdn_url, 'is_dash': False}
+                entry = {'url': cdn_url, 'title': info.get('title'), 'is_dash': False}
                 results[target_id] = entry
                 utils.set_cached_url(target_id, entry, service_name=service_name)
 
@@ -288,6 +297,15 @@ def route_remux_mp4(video_id, service='auto'):
 
 def route_remux_ts(video_id, service='auto'):
     return _stream_internal(service, video_id, mode_override='remux', target_format_override='ts')
+
+def route_play_no_remux(video_id, service='auto'):
+    return _stream_internal(service, video_id, mode_override='no-remux')
+
+def route_redirect_no_remux(video_id, service='auto'):
+    return _stream_internal(service, video_id, mode_override='redirect-no-remux')
+
+def route_proxy_no_remux(video_id, service='auto'):
+    return _stream_internal(service, video_id, mode_override='proxy-no-remux')
 
 def route_bounce(target_url):
     return _static_internal(target_url, 'bounce')
@@ -327,6 +345,11 @@ add_resolving_route('proxy_url_pattern_remux', '/remux/{service}/{video_id}', ro
 add_resolving_route('proxy_url_pattern_remux_mp4', '/remux/mp4/{service}/{video_id}', route_remux_mp4)
 add_resolving_route('proxy_url_pattern_remux_ts', '/remux/ts/{service}/{video_id}', route_remux_ts)
 
+# bind dynamic resolving routes (force no-remux)
+add_resolving_route('proxy_url_pattern_no_remux', '/play-no-remux/{service}/{video_id}', route_play_no_remux)
+add_resolving_route('proxy_url_pattern_redirect_no_remux', '/redirect-no-remux/{service}/{video_id}', route_redirect_no_remux)
+add_resolving_route('proxy_url_pattern_proxy_no_remux', '/proxy-no-remux/{service}/{video_id}', route_proxy_no_remux)
+
 # bind static custom playlist routes
 add_static_route('proxy_url_pattern_bounce', '/bounce/{video_id}', route_bounce)
 add_static_route('proxy_url_pattern_reflect', '/reflect/{video_id}', route_reflect)
@@ -339,16 +362,23 @@ def _stream_internal(service, video_id, mode_override=None, target_format_overri
     config = utils.load_config()
     global_mode = config.get('proxy', 'mode', fallback='redirect').strip().lower()
     
-    # check if we are forcing remux
+    # evaluate explicit remux / no-remux flags
     force_remux = (mode_override == 'remux')
-    # determine the effective operating mode
-    mode = mode_override if mode_override and mode_override != 'remux' else global_mode
+    force_no_remux = mode_override in ('no-remux', 'redirect-no-remux', 'proxy-no-remux')
+
+    # determine the effective operating mode (redirect or proxy)
+    if mode_override in ('redirect', 'redirect-no-remux'):
+        mode = 'redirect'
+    elif mode_override in ('proxy', 'proxy-no-remux'):
+        mode = 'proxy'
+    else:
+        mode = global_mode
 
     try:
-        cached_entry, is_cached = resolve_cdn_url(video_id, service_name=service, force_dash=force_remux)
+        cached_entry, is_cached = resolve_cdn_url(video_id, service_name=service, force_dash=force_remux, force_no_dash=force_no_remux)
 
         # --- REMUX: if entry is DASH, stream via ffmpeg in-memory ---
-        if isinstance(cached_entry, dict) and cached_entry.get('is_dash'):
+        if not force_no_remux and isinstance(cached_entry, dict) and cached_entry.get('is_dash'):
             return _serve_remux_implementation(cached_entry, f"{service}:{video_id}", target_format_override=target_format_override)
 
         # extract direct CDN URL

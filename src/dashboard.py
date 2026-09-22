@@ -19,6 +19,7 @@ from flask import Flask, request, Response, jsonify, send_from_directory, stream
 import flask.cli
 import queue
 import logging
+import proxy
 import utils
 import sync
 
@@ -38,18 +39,61 @@ app.json.sort_keys = False
 # directory for web UI static dashboard assets
 HTML_DIR = os.path.join(utils.CONFIG_DIR, 'assets', 'html')
 
-@app.route('/')
-@app.route('/playlists')
-@app.route('/playlists/online')
-@app.route('/playlists/custom')
-@app.route('/services')
-@app.route('/settings')
-@app.route('/raw-config')
+@app.route('/', strict_slashes=False)
+@app.route('/overview', strict_slashes=False)
+@app.route('/status', strict_slashes=False)
+@app.route('/home', strict_slashes=False)
+@app.route('/playlists', strict_slashes=False)
+@app.route('/playlists/online', strict_slashes=False)
+@app.route('/playlists/custom', strict_slashes=False)
+@app.route('/services', strict_slashes=False)
+@app.route('/settings', strict_slashes=False)
+@app.route('/raw-config', strict_slashes=False)
 def index_routes():
     """Serves the main dashboard for all top-level UI paths."""
     if os.path.exists(os.path.join(HTML_DIR, 'index.html')):
         return send_from_directory(HTML_DIR, 'index.html')
     return "<h3>Error: yt-dlna Web UI assets not found.</h3>", 404
+
+@app.route('/add', strict_slashes=False)
+@app.route('/add-to', strict_slashes=False)
+@app.route('/quick-add', strict_slashes=False)
+@app.route('/add/<path:playlist_name>')
+@app.route('/add-to/<path:playlist_name>')
+@app.route('/quick-add/<path:playlist_name>')
+def quick_add_page(playlist_name=None):
+    """Serves the Quick-Add page."""
+    if os.path.exists(os.path.join(HTML_DIR, 'quick-add.html')):
+        return send_from_directory(HTML_DIR, 'quick-add.html')
+    return "<h3>Error: yt-dlna Web UI asset (quick-add.html) not found.</h3>", 404
+
+@app.route('/play-to', strict_slashes=False)
+@app.route('/render', strict_slashes=False)
+@app.route('/cast', strict_slashes=False)
+@app.route('/play-to/<path:target_url>')
+@app.route('/render/<path:target_url>')
+@app.route('/cast/<path:target_url>')
+def play_to_page(target_url=None):
+    """Serves the Play-To controller interface."""
+    if os.path.exists(os.path.join(HTML_DIR, 'play-to.html')):
+        return send_from_directory(HTML_DIR, 'play-to.html')
+    return "<h3>Error: yt-dlna Web UI asset (play-to.html) not found.</h3>", 404
+
+@app.route('/playlist/<path:playlist_name>')
+@app.route('/playlist/online/<path:playlist_name>')
+@app.route('/playlist/custom/<path:playlist_name>')
+def view_playlist(playlist_name):
+    """Serves the playlist viewer."""
+    if os.path.exists(os.path.join(HTML_DIR, 'view-playlist.html')):
+        return send_from_directory(HTML_DIR, 'view-playlist.html')
+    return "<h3>Error: yt-dlna Web UI asset (view-playlist.html) not found.</h3>", 404
+
+@app.route('/playlists/custom/edit', strict_slashes=False)
+def editor_page():
+    """Serves the Custom Playlist editor."""
+    if os.path.exists(os.path.join(HTML_DIR, 'editor.html')):
+        return send_from_directory(HTML_DIR, 'editor.html')
+    return "<h3>Error: yt-dlna Web UI asset (editor.html) not found.</h3>", 404
 
 @app.route('/icon.png')
 def serve_icon():
@@ -62,178 +106,12 @@ def serve_icon():
             return send_from_directory(os.path.dirname(icon_path), os.path.basename(icon_path))
     return '', 404
 
-def _render_custom_hierarchy(nodes, parent_mode, proxy_base, cfg, depth=0):
-    """Recursively generates nested div structure for custom playlists."""
-    html = ""
-    if not nodes:
-        return html
-
-    for node in nodes:
-        name = utils.xml_escape(node.get('name', 'Untitled'))
-
-        if node.get('type') == 'folder':
-            folder_mode = node.get('mode') or parent_mode
-            
-            html += f'<div class="playlist-folder-card">📁 {name}</div>'
-            
-            # recurse into children
-            html += '<div class="hierarchy-level">'
-            html += _render_custom_hierarchy(node.get('children', []), folder_mode, proxy_base, cfg)
-            html += '</div>'
-        
-        else:
-            target_url = node.get('url', '')
-            safe_target = urllib.parse.quote(target_url, safe='')
-
-            mode = node.get('mode') or parent_mode
-            reflect_url = f"{proxy_base}/reflect/{safe_target}"
-            
-            if mode == 'direct':
-                proxy_url = target_url
-            else:
-                proxy_url = f"{proxy_base}/{mode}/{safe_target}"
-
-            html += f"""
-            <div class="playlist-view-item">
-                <div class="item-main">
-                    <a href="{proxy_url}" target="_blank" title="Play (with selected proxy mode)">{utils.xml_escape(name)}</a>
-                </div>
-                <div class="item-actions">
-                    <a href="{reflect_url}" class="action-link" target="_blank" title="Play (reflected via proxy)">Play</a>
-                    <span class="sep">|</span>
-                    <a href="{target_url}" class="action-link" target="_blank" title="Source URL, right-click to 'Save as...'">Download</a>
-                    <span class="sep">|</span>
-                    <a href="{target_url}" class="action-link" target="_blank" title="View original web page">Web Page</a>
-                </div>
-            </div>\n"""
-            
-    return html
-
-@app.route('/playlist/<path:playlist_name>')
-@app.route('/playlist/online/<path:playlist_name>')
-@app.route('/playlist/custom/<path:playlist_name>')
-def view_playlist(playlist_name):
-    """Renders a simple HTML page with clickable stream hyperlinks for a playlist."""
-    playlist_name = urllib.parse.unquote(playlist_name)
-    is_custom = request.path.startswith('/playlist/custom/')
-    
-    config = utils.load_config()
-    base_url = utils.get_stream_base_url()
-    
-    if is_custom:
-        # --- custom playlist hierarchy ---
-        pl_type = 'custom'
-        registry = utils.get_custom_playlists_registry()
-        reg_entry = next((r for r in registry if r['name'] == playlist_name), None)
-        if not reg_entry:
-            return "Custom playlist not found", 404
-            
-        file_path = os.path.join(utils.CONFIG_DIR, reg_entry['file'])
-        if not os.path.exists(file_path):
-            return "Custom playlist file missing", 404
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            root_mode = data.get('mode') or 'bounce'
-            links_html = _render_custom_hierarchy(data.get('children', []), root_mode, base_url, config)
-            back_url = "/playlists/custom"
-
-    else:
-        # --- online playlist flat list ---
-        pl_type = 'online'
-        library = {}
-        if os.path.exists(utils.JSON_PATH):
-            with open(utils.JSON_PATH, 'r', encoding='utf-8') as f:
-                library = json.load(f)
-        
-        raw_data = library.get(playlist_name, [])
-        if isinstance(raw_data, dict):
-            items = raw_data.get('items', [])
-            pl_service = raw_data.get('service', 'youtube')
-        else:
-            items = raw_data
-            pl_service = None
-
-        redirect_pattern = config.get('proxy', 'proxy_url_pattern_redirect', fallback='/redirect/{service}/{video_id}')
-        links_html = ""
-        back_url = "/playlists/online"
-
-        for idx, item in enumerate(items, 1):
-            disp_title = utils.format_item_title(item, enum_idx=idx)
-            item_id = str(item.get('id', ''))
-            proxy_url = item.get('proxy_url', '#')
-            web_url = item.get('web_url', '#')
-            
-            # fallback for missing web_urls
-            if web_url == '#' and item_id.startswith('http'):
-                web_url = item_id
-
-            v_id_encoded = urllib.parse.quote(item_id, safe='')
-            service = str(pl_service or item.get('service', 'youtube'))
-            download_link = f"{base_url}{redirect_pattern.replace('{service}', service).replace('{video_id}', v_id_encoded)}"
-
-            links_html += f"""
-            <div class="playlist-view-item">
-                <div class="item-main">
-                    <a href="{proxy_url}" target="_blank" title="Play (via proxy)">{utils.xml_escape(disp_title)}</a>
-                </div>
-                <div class="item-actions">
-                    <a href="{proxy_url}" class="action-link" target="_blank" title="Play (via proxy)">Play</a>
-                    <span class="sep">|</span>
-                    <a href="{download_link}" class="action-link" target="_blank" title="Proxy redirect to CDN URL, right-click to 'Save as...'">Download</a>
-                    <span class="sep">|</span>
-                    <a href="{web_url}" class="action-link" target="_blank" title="View original video web page">Web Page</a>
-                </div>
-            </div>\n"""
-
-    return f"""<!DOCTYPE html>
-<html lang="en" data-theme="dark">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>yt-dlna - {utils.xml_escape(playlist_name)} - Playlist View</title>
-    <link rel="stylesheet" href="/style.css">
-    <link rel="icon" href="/icon.png" type="image/png">
-</head>
-<body class="playlist-page">
-    <div class="container">
-        <header class="header">
-            <div class="brand">
-                <img src="/icon.png" alt="yt-dlna Logo" class="logo">
-                <div>
-                    <h1>{utils.xml_escape(playlist_name)}</h1>
-                    <p class="subtitle"><strong>yt-dlna</strong> &#8226; {'Custom' if pl_type == 'custom' else 'Online'} Playlist View</p>
-                </div>
-            </div>
-            <div class="header-right">
-                <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
-                <div class="actions">
-                    <a href="{back_url}" class="btn btn-small secondary">Back to Dashboard</a>
-                </div>
-            </div>
-        </header>
-
-        <section class="card">
-            <ul class="playlist-view-list">
-                {links_html or '<li class="placeholder">This playlist is empty.</li>'}
-            </ul>
-        </section>
-        
-    </div>
-    <script src="/script.js"></script>
-</body>
-</html>"""
-
-@app.route('/playlists/custom/edit')
-def editor_page():
-    return send_from_directory(HTML_DIR, 'editor.html')
-
 @app.route('/<path:filename>')
 def static_assets(filename):
     """Serves static asset files (CSS, JS, icons) from assets/html/."""
     return send_from_directory(HTML_DIR, filename)
 
-@app.route('/api/status', methods=['GET'])
+@app.route('/api/status', methods=['GET'], strict_slashes=False)
 def get_status():
     """Returns app status, version, playlist counts and sync times, stream statistics etc."""
     config = utils.load_config()
@@ -414,12 +292,12 @@ def handle_config():
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/api/logs')
+@app.route('/api/logs', strict_slashes=False)
 def api_logs():
     # returns the last 1000 lines as a JSON list
     return jsonify(utils.get_buffered_logs())
 
-@app.route('/api/logs/stream')
+@app.route('/api/logs/stream', strict_slashes=False)
 def stream_logs():
     def generate():
         q = utils.subscribe_logs()
@@ -495,6 +373,94 @@ def upload_cookies():
 
     return jsonify({'status': 'error', 'message': 'No data provided'}), 400
 
+@app.route('/api/playlist/view-data')
+def get_playlist_view_data():
+    """Returns structured playlist items and metadata for the view playlist page."""
+    name = request.args.get('name', '').strip()
+    pl_type = request.args.get('type', '').strip().lower()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'Missing playlist name'}), 400
+
+    config = utils.load_config()
+    base_url = utils.get_stream_base_url()
+    redirect_pattern = config.get('proxy', 'proxy_url_pattern_redirect', fallback='/redirect/{service}/{video_id}')
+
+    # auto-detect type if not provided
+    if not pl_type:
+        custom_reg = utils.get_custom_playlists_registry()
+        pl_type = 'custom' if any(r['name'] == name for r in custom_reg) else 'online'
+
+    if pl_type == 'custom':
+        registry = utils.get_custom_playlists_registry()
+        reg_entry = next((r for r in registry if r['name'] == name), None)
+        if not reg_entry:
+            return jsonify({'status': 'error', 'message': 'Custom playlist not found'}), 404
+
+        file_path = os.path.join(utils.CONFIG_DIR, reg_entry['file'])
+        if not os.path.exists(file_path):
+            return jsonify({'status': 'error', 'message': 'Custom playlist file missing'}), 404
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                cpl_data = json.loads(content) if content else {}
+        except Exception:
+            cpl_data = {}
+
+        root_mode = (cpl_data.get('mode') if isinstance(cpl_data, dict) else None) or 'default'
+        children = cpl_data if isinstance(cpl_data, list) else cpl_data.get('children', [])
+
+        return jsonify({
+            'status': 'success',
+            'name': name,
+            'type': 'custom',
+            'root_mode': root_mode,
+            'children': children,
+            'base_url': base_url
+        })
+
+    else:
+        library = utils.get_library()
+        raw_data = library.get(name, {})
+        if isinstance(raw_data, dict):
+            raw_items = raw_data.get('items', [])
+            pl_service = raw_data.get('service', 'auto')
+        else:
+            raw_items = raw_data if isinstance(raw_data, list) else []
+            pl_service = 'auto'
+
+        formatted_items = []
+        for idx, item in enumerate(raw_items, 1):
+            item_id = str(item.get('id', ''))
+            service = str(pl_service or item.get('service', 'auto'))
+            v_id_encoded = urllib.parse.quote(item_id, safe='')
+
+            disp_title = utils.format_item_title(item, enum_idx=idx)
+            proxy_url = item.get('proxy_url', '#')
+            web_url = item.get('web_url', '#')
+            if web_url == '#' and item_id.startswith('http'):
+                web_url = item_id
+
+            download_link = f"{base_url}{redirect_pattern.replace('{service}', service).replace('{video_id}', v_id_encoded)}"
+
+            formatted_items.append({
+                'id': item_id,
+                'title': disp_title,
+                'service': service,
+                'proxy_url': proxy_url,
+                'download_url': download_link,
+                'web_url': web_url
+            })
+
+        return jsonify({
+            'status': 'success',
+            'name': name,
+            'type': 'online',
+            'service': pl_service,
+            'items': formatted_items,
+            'base_url': base_url
+        })
+
 def _handle_rename_logic(old_sec, new_sec):
     if not old_sec or not new_sec: return jsonify({'status': 'error', 'message': 'Missing names'}), 400
     try:
@@ -534,7 +500,7 @@ def rename_generic():
     d = request.get_json()
     return _handle_rename_logic(d.get('old'), d.get('new'))
 
-@app.route('/api/playlists/custom', methods=['GET'])
+@app.route('/api/playlists/custom', methods=['GET'], strict_slashes=False)
 def get_custom_playlists():
     """Returns the list of custom playlists from the config registry."""
     try:
@@ -546,10 +512,11 @@ def get_custom_playlists():
 
 @app.route('/api/playlists/custom/add', methods=['POST'])
 def add_custom_playlist():
-    """Registers a new custom playlist and creates the JSON file."""
+    """Registers a new custom playlist and creates the JSON file with standard root structure."""
     d = request.get_json() or {}
     name = d.get('name', '').strip()
     file_rel_path = d.get('file', '').strip()
+    mode = d.get('mode', 'bounce').strip() or 'bounce'
 
     if not name or not file_rel_path:
         return jsonify({'status': 'error', 'message': 'Name and File Path are required'}), 400
@@ -562,7 +529,8 @@ def add_custom_playlist():
     try:
         # create physical file
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        utils.replace_save_json(full_path, [])
+        # initialize with standard root folder schema
+        utils.replace_save_json(full_path, {"children": []}, indent=4)
         
         # add to yt-dlna.conf registry
         sec = f"custom_playlists:{name}"
@@ -660,6 +628,133 @@ def handle_custom_playlist_data():
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/playlists/custom/item/add', methods=['POST'])
+def add_custom_playlist_item():
+    """Quickly appends an item to a custom playlist and triggers instant background pre-resolve."""
+    d = request.get_json() or {}
+    playlist_name = d.get('playlist', '').strip()
+    url = d.get('url', '').strip()
+    name = d.get('name', '').strip()
+    service = d.get('service', 'auto').strip() or 'auto'
+    mode = d.get('mode', '').strip()  # empty string means 'inherit'
+
+    if not playlist_name or not url:
+        return jsonify({'status': 'error', 'message': 'Playlist and URL are required'}), 400
+
+    config = utils.load_config()
+    section = f"custom_playlists:{playlist_name}"
+    file_rel_path = config.get(section, 'playlist_file', fallback=None)
+    if not file_rel_path:
+        return jsonify({'status': 'error', 'message': f"Playlist '{playlist_name}' not found"}), 404
+
+    full_path, error = utils.get_secure_path(file_rel_path)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 403
+
+    try:
+        data = {}
+        if os.path.exists(full_path):
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                data = json.loads(content) if content else {}
+
+        if isinstance(data, list):
+            data = {"name": playlist_name, "type": "folder", "children": data}
+        elif not isinstance(data, dict):
+            data = {"name": playlist_name, "type": "folder", "children": []}
+
+        if "children" not in data:
+            data["children"] = []
+
+        # if playlist is marked as Watch Later (precache=yes) and root mode is unset or 'bounce',
+        # promote root mode to 'default' so all inheriting items resolve properly
+        is_precache = config.getboolean(section, 'precache', fallback=False)
+        if is_precache and data.get('mode') in (None, '', 'bounce'):
+            data['mode'] = 'default'
+
+        item_name = name if name else url
+        new_item = {
+            'name': item_name,
+            'url': url,
+            'service': service
+        }
+
+        if mode:
+            new_item['mode'] = mode
+
+        data["children"].append(new_item)
+        utils.replace_save_json(full_path, data, indent=4)
+        utils.log(_LOG_SRC, f"Added item '{item_name}' to Custom Playlist '{playlist_name}'.", level=4)
+
+        effective_mode = mode if mode else data.get('mode', 'bounce')
+        resolving_modes = {'default', 'redirect', 'proxy', 'remux', 'remux_mp4', 'remux_ts'}
+
+        if effective_mode in resolving_modes:
+            def background_resolve_and_title():
+                try:
+                    utils.log(_LOG_SRC, f"Instant background pre-resolve for '{utils.short(url)}'...", "cache")
+                    entry, _ = proxy.resolve_cdn_url(url, service_name=service)
+
+                    if not name and entry:
+                        srv_cfg = utils.get_service_config(service)
+                        norm_url = proxy._normalize_video_url(url, srv_cfg['extractor'])
+                        info = utils.extract_youtube_info(norm_url, extra_opts={'extract_flat': True})
+                        fetched_title = info.get('title') if isinstance(info, dict) else None
+                        if fetched_title:
+                            with utils._file_lock:
+                                with open(full_path, 'r', encoding='utf-8') as rf:
+                                    cur_data = json.load(rf)
+                                items_list = cur_data.get('children', []) if isinstance(cur_data, dict) else cur_data
+                                for it in items_list:
+                                    if it.get('url') == url and it.get('name') == url:
+                                        it['name'] = fetched_title
+                                        break
+                                utils.replace_save_json(full_path, cur_data, indent=4)
+                            utils.log(_LOG_SRC, f"Auto-updated title for '{utils.short(url)}': '{fetched_title}'", level=4)
+                except Exception as ex:
+                    utils.log(_LOG_SRC, f"Background resolve error for '{utils.short(url)}': {ex}", "cache", level=1, type='E')
+
+            threading.Thread(target=background_resolve_and_title, daemon=True).start()
+
+        return jsonify({'status': 'success', 'message': 'Item added successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/playlists/custom/item/delete', methods=['POST'])
+def delete_custom_playlist_item():
+    """Deletes an item by index from a custom playlist."""
+    d = request.get_json() or {}
+    playlist_name = d.get('playlist', '').strip()
+    index = d.get('index')
+
+    if not playlist_name or index is None:
+        return jsonify({'status': 'error', 'message': 'Playlist and Index are required'}), 400
+
+    config = utils.load_config()
+    section = f"custom_playlists:{playlist_name}"
+    file_rel_path = config.get(section, 'playlist_file', fallback=None)
+    if not file_rel_path:
+        return jsonify({'status': 'error', 'message': 'Playlist not found'}), 404
+
+    full_path, error = utils.get_secure_path(file_rel_path)
+    if error:
+        return jsonify({'status': 'error', 'message': error}), 403
+
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        items = data.get('children', []) if isinstance(data, dict) else data
+        idx = int(index)
+        if 0 <= idx < len(items):
+            removed = items.pop(idx)
+            utils.replace_save_json(full_path, data, indent=4)
+            utils.log(_LOG_SRC, f"Removed item '{removed.get('name')}' from '{playlist_name}'.", level=4)
+            return jsonify({'status': 'success'})
+        return jsonify({'status': 'error', 'message': 'Index out of range'}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/services/delete', methods=['POST'])
 def delete_service():
     name = request.get_json().get('name')
@@ -684,6 +779,70 @@ def purge_library_api():
     if success:
         return jsonify({'status': 'success', 'message': 'Playlist library reset successfully'})
     return jsonify({'status': 'error', 'message': 'Failed to reset playlist library'}), 500
+
+@app.route('/api/renderers', strict_slashes=False)
+def get_renderers_api():
+    """Returns discovered UPnP MediaRenderers and currently configured default."""
+    import dlna_server
+    config = utils.load_config()
+    cfg_default = config.get('dlna', 'default_renderer', fallback='').strip()
+    renderers = dlna_server.load_renderers()
+    renderer_list = []
+    for udn_key, r_info in renderers.items():
+        item = dict(r_info)
+        item['udn'] = udn_key
+        renderer_list.append(item)
+
+    return jsonify({
+        'status': 'success',
+        'default_renderer': cfg_default,
+        'renderers': renderer_list
+    })
+
+@app.route('/api/renderers/scan', methods=['POST'])
+def trigger_renderer_scan_api():
+    """Triggers an immediate active SSDP M-SEARCH scan for MediaRenderers."""
+    import dlna_server
+    threading.Thread(target=dlna_server.scan_for_renderers, daemon=True).start()
+    return jsonify({'status': 'success', 'message': 'Renderer scan initiated'})
+
+@app.route('/api/renderers/default', methods=['POST'])
+def set_default_renderer_api():
+    """Updates the default_renderer setting in yt-dlna.conf."""
+    data = request.get_json(silent=True) or {}
+    target_renderer = data.get('renderer', '').strip()
+    
+    try:
+        utils.update_config_single_key('dlna', 'default_renderer', target_renderer)
+        utils.log(_LOG_SRC, f"Default renderer updated in config: '{target_renderer}'", level=4)
+        return jsonify({'status': 'success', 'default_renderer': target_renderer})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/play-to', methods=['POST'])
+def trigger_play_to_api():
+    """Initiates playback of a video stream on a target UPnP MediaRenderer."""
+    import dlna_server
+    data = request.get_json(silent=True) or {}
+    video_url = data.get('url', '').strip()
+    renderer_key = data.get('renderer', 'default-renderer').strip() or 'default-renderer'
+    service = data.get('service', 'auto').strip() or 'auto'
+    mode = data.get('mode', 'default').strip() or 'default'
+
+    if not video_url:
+        return jsonify({'status': 'error', 'message': 'Video URL or ID is required'}), 400
+
+    try:
+        utils.log(_LOG_SRC, f"Play-To requested for '{utils.short(video_url)}' on renderer '{renderer_key}' (mode: {mode}, service: {service})")
+        res = dlna_server.play_to_renderer(renderer_key, video_url, service=service, mode=mode)
+        return jsonify({
+            'status': 'success',
+            'message': f"Playing on '{res.get('renderer')}'",
+            'data': res
+        })
+    except Exception as e:
+        utils.log(_LOG_SRC, f"Play-To failed: {e}", level=1, type='E')
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def start_web_server():
     """Launches the Web UI Flask server in a background thread on configured port."""

@@ -46,6 +46,18 @@ proxy_url_pattern_remux_mp4 = /remux/mp4/{service}/{video_id}
 # will enforce remux mode like above and force MPEG-TS output
 proxy_url_pattern_remux_ts = /remux/ts/{service}/{video_id}
 
+# the following routes strictly bypass DASH remuxing, even if
+# otherwise enabled and indicated by remux_threshold:
+
+# will use operating mode defined by 'mode' setting, but never remux
+proxy_url_pattern_no_remux = /play-no-remux/{service}/{video_id}
+
+# will enforce redirect mode and never remux
+proxy_url_pattern_redirect_no_remux = /redirect-no-remux/{service}/{video_id}
+
+# will enforce proxy mode and never remux
+proxy_url_pattern_proxy_no_remux = /proxy-no-remux/{service}/{video_id}
+
 # the following two routes will skip any yt-dlp CDN URL resolving,
 # and are used for Custom Playlists with known, static target URLs,
 # so no {service} part for those; also, the {video_id} for those has
@@ -93,9 +105,25 @@ dlna_port = 8200
 friendly_name = yt-dlna Media Server
 icon = assets/yt-dlna.png
 
+# Unique Device Name UUID for UPnP/DLNA discovery (auto-generated if empty)
+uuid = 
+
+# Screen ID for DIAL / Cast pairing (auto-generated if empty)
+dial_screen_id =
+
 # leave blank to auto-detect this host's primary IP and the proxy parameters above
 stream_url_base = 
 stream_url_pattern = 
+
+# enable active SSDP background search for UPnP renderers
+enable_renderer_discovery = yes
+
+# enable announcing this server as a DIAL (YouTube Cast) receiver
+enable_dial_server = yes
+dial_friendly_name = yt-dlna Cast/UPnP Bridge
+
+# UDN UUID or name of the preferred default renderer (empty = last used/first found)
+default_renderer = 
 
 
 # -----------------------------------------------------------------------------

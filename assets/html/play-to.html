@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>yt-dlna - Play To</title>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .play-to-form { display: flex; flex-direction: column; gap: 12px; }
+        .form-group { display: flex; flex-direction: column; gap: 4px; }
+        .form-group label { font-size: 0.85rem; color: var(--text-secondary); }
+        .form-row { display: flex; gap: 10px; }
+        .input-row { display: flex; gap: 8px; width: 100%; }
+        .input-row select { flex: 1; }
+        .expert-toggle { font-size: 0.85rem; color: var(--accent-primary); cursor: pointer; user-select: none; margin-top: 4px; }
+        .expert-panel { display: none; flex-direction: column; gap: 10px; margin-top: 8px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; }
+        .expert-panel.open { display: flex; }
+        #btn-submit { margin-top: 8px; align-self: flex-end; }
+        .status-box { display: none; padding: 12px 16px; border-radius: 8px; margin-top: 16px; font-size: 0.9rem; font-weight: 500; }
+        .status-box.active { display: block; }
+        .status-box.loading { background: rgba(56, 189, 248, 0.15); border: 1px solid var(--accent-blue); color: var(--accent-blue); }
+        .status-box.success { background: rgba(22, 198, 182, 0.15); border: 1px solid var(--accent-primary); color: var(--accent-primary); }
+        .status-box.error { background: rgba(255, 66, 66, 0.15); border: 1px solid var(--accent-red); color: var(--accent-red); }
+        @media (max-width: 600px) { #btn-submit { align-self: stretch; width: 100%; } .form-row { flex-direction: column; gap: 10px; } }
+    </style>
+</head>
+<body class="playlist-page">
+    <div class="container">
+        <header class="header">
+            <div class="brand">
+                <img src="/icon.png" alt="yt-dlna Logo" class="logo">
+                <div>
+                    <h1 id="page-title">Play To</h1>
+                    <p class="subtitle"><strong>yt-dlna</strong> &#8226; Play video on TV or other UPnP Media Renderer</p>
+                </div>
+            </div>
+            <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
+                <button class="btn theme-toggle" id="btn-theme-toggle">☀️ Light Mode</button>
+                <div class="actions">
+                    <a href="/" class="btn btn-small secondary">Back to Dashboard</a>
+                </div>
+            </div>
+        </header>
+
+        <section class="card">
+            <form id="play-to-form" class="play-to-form">
+                <div class="form-group">
+                    <label for="video-url">Play this video:</label>
+                    <input type="text" id="video-url" class="input" placeholder="e.g. https://www.youtube.com/watch?v=..." required autofocus>
+                </div>
+
+                <div class="form-group">
+                    <label for="renderer-select">On this renderer / TV:</label>
+                    <div class="input-row">
+                        <select id="renderer-select" class="input" required>
+                            <option value="default-renderer" selected>Default renderer (configured in settings)</option>
+                            <option value="last-renderer">Last used renderer</option>
+                            <optgroup label="Discovered UPnP renderers" id="discovered-renderers-group"></optgroup>
+                        </select>
+                        <button type="button" class="btn secondary btn-small" id="btn-scan" title="Scan local network for UPnP renderers"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px; padding-bottom: 2px;"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> <span class="btn-text">Scan</span></button>
+                    </div>
+                </div>
+
+                <div class="expert-toggle" id="expert-toggle">▼ Show advanced options</div>
+
+                <div class="expert-panel" id="expert-panel">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="service-select">Service</label>
+                            <select id="service-select" class="input">
+                                <option value="auto" selected>auto (auto-detect service)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="mode-select">Proxy Mode</label>
+                            <select id="mode-select" class="input">
+                                <optgroup label="resolving modes (CDN target URL)">
+                                    <option value="default" selected>default (configured default proxy mode)</option>
+                                    <option value="redirect">redirect (HTTP 302 to CDN URL)</option>
+                                    <option value="proxy">proxy (tunnel from CDN URL)</option>
+                                    <option value="remux">remux (force remux, configured format)</option>
+                                    <option value="remux_ts">remux_ts (force remux to MPEG-TS)</option>
+                                    <option value="remux_mp4">remux_mp4 (force remux to MPEG-TS)</option>
+                                    <option value="no-remux">no-remux (default proxy mode, never remux)</option>
+                                    <option value="redirect-no-remux">redirect-no-remux ('redirect' mode, never remux)</option>
+                                    <option value="proxy-no-remux">proxy-no-remux ('proxy' mode, never remux)</option>
+                                </optgroup>
+                                <optgroup label="non-resolving modes (static target URL)">
+                                    <option value="direct">direct (source URL)</option>
+                                    <option value="bounce">bounce (HTTP 302 to source URL)</option>
+                                    <option value="reflect">reflect (tunnel from source URL)</option>
+                                    <option value="hit">hit (action trigger, stream dummy file)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn primary" id="btn-submit">▶ Play to Renderer</button>
+            </form>
+
+            <!-- Feedback / Status Box -->
+            <div id="status-box" class="status-box"></div>
+        </section>
+    </div>
+
+    <script>
+        let discoveredRenderers = [];
+        let availableServices = ['auto'];
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('yt-dlna-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeButtonText(savedTheme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('yt-dlna-theme', newTheme);
+            updateThemeButtonText(newTheme);
+        }
+
+        function updateThemeButtonText(theme) {
+            const btn = document.getElementById('btn-theme-toggle');
+            if (btn) btn.textContent = theme === 'dark' ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+
+        const themeBtn = document.getElementById('btn-theme-toggle');
+        if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+        const expertToggle = document.getElementById('expert-toggle');
+        const expertPanel = document.getElementById('expert-panel');
+        expertToggle.addEventListener('click', () => {
+            expertPanel.classList.toggle('open');
+            expertToggle.textContent = expertPanel.classList.contains('open') ? '▲ Hide advanced options' : '▼ Show advanced options';
+        });
+
+        function showStatus(message, type) {
+            const box = document.getElementById('status-box');
+            box.className = `status-box active ${type}`;
+            box.textContent = message;
+        }
+
+        // load services into dropdown
+        async function loadServices() {
+            try {
+                const res = await fetch('/api/config/parsed');
+                const json = await res.json();
+                const sel = document.getElementById('service-select');
+                sel.innerHTML = '<option value="auto" selected>auto (auto-detect service)</option>';
+                availableServices = ['auto'];
+
+                if (json.config && json.config.resolved_services) {
+                    Object.keys(json.config.resolved_services).forEach(s => {
+                        if (s !== 'auto' && s !== 'global') {
+                            const opt = document.createElement('option');
+                            opt.value = s;
+                            opt.textContent = s;
+                            sel.appendChild(opt);
+                            availableServices.push(s);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to load services:', e);
+            }
+        }
+
+        // load renderers into dropdown
+        async function loadRenderers() {
+            try {
+                const res = await fetch('/api/renderers');
+                const json = await res.json();
+                const group = document.getElementById('discovered-renderers-group');
+                group.innerHTML = '';
+                discoveredRenderers = json.renderers || [];
+
+                if (discoveredRenderers.length > 0) {
+                    discoveredRenderers.forEach(r => {
+                        const opt = document.createElement('option');
+                        opt.value = r.control_url || r.name;
+                        opt.textContent = `${r.name} (${r.ip || 'LAN'})`;
+                        group.appendChild(opt);
+                    });
+                } else {
+                    const opt = document.createElement('option');
+                    opt.disabled = true;
+                    opt.textContent = 'No renderers detected yet (click Scan)';
+                    group.appendChild(opt);
+                }
+            } catch (e) {
+                console.error('Failed to load renderers:', e);
+            }
+        }
+
+        // trigger new SSDP scan
+        document.getElementById('btn-scan').addEventListener('click', async () => {
+            const btn = document.getElementById('btn-scan');
+            const icon = btn.querySelector('svg');
+            const text = btn.querySelector('.btn-text');
+
+            btn.disabled = true;
+            if (text) text.textContent = 'Scanning...';
+            if (icon) icon.classList.add('spinning');
+
+            try {
+                await fetch('/api/renderers/scan', { method: 'POST' });
+                setTimeout(async () => {
+                    await loadRenderers();
+                    btn.disabled = false;
+                    if (text) text.textContent = 'Scan';
+                    if (icon) icon.classList.remove('spinning');
+                }, 3000);
+            } catch (e) {
+                btn.disabled = false;
+                if (text) text.textContent = 'Scan';
+                if (icon) icon.classList.remove('spinning');
+            }
+        });
+
+        // pre-select fields from URL deep-links
+        function parsePathSpecification() {
+            const parts = window.location.pathname.split('/').filter(Boolean);
+            if (parts.length <= 1) return;
+
+            // everything after /play-to/ or /render/ or /cast/
+            const tokens = parts.slice(1);
+            let idx = 0;
+
+            const knownModes = [
+                'remux_ts', 'remux_mp4', 'remux', 'redirect', 'proxy', 'play',
+                'no-remux', 'play-no-remux', 'redirect-no-remux', 'proxy-no-remux',
+                'direct', 'bounce', 'reflect'
+            ];
+
+            // renderer (uuid:..., default-renderer, last-renderer)
+            if (tokens.length > idx) {
+                const t0 = decodeURIComponent(tokens[idx]);
+                if (t0.startsWith('uuid:') || t0 === 'default-renderer' || t0 === 'last-renderer' || t0 === 'default' || t0 === 'last') {
+                    const mappedRenderer = (t0 === 'default' ? 'default-renderer' : (t0 === 'last' ? 'last-renderer' : t0));
+                    document.getElementById('renderer-select').value = mappedRenderer;
+                    idx++;
+                }
+            }
+
+            // mode (including 2-position modes like remux/ts)
+            if (tokens.length > idx + 1) {
+                const twoToken = `${decodeURIComponent(tokens[idx])}/${decodeURIComponent(tokens[idx+1])}`.toLowerCase();
+                if (twoToken === 'remux/ts' || twoToken === 'remux/mp4') {
+                    document.getElementById('mode-select').value = (twoToken === 'remux/ts' ? 'remux_ts' : 'remux_mp4');
+                    expertPanel.classList.add('open');
+                    expertToggle.textContent = '▲ Hide advanced options';
+                    idx += 2;
+                }
+            }
+
+            if (tokens.length > idx) {
+                const oneToken = decodeURIComponent(tokens[idx]).toLowerCase();
+                if (knownModes.includes(oneToken)) {
+                    if (oneToken !== 'play') {
+                        document.getElementById('mode-select').value = oneToken;
+                        expertPanel.classList.add('open');
+                        expertToggle.textContent = '▲ Hide advanced options';
+                    }
+                    idx++;
+                }
+            }
+
+            // service
+            if (tokens.length > idx + 1) {
+                const sToken = decodeURIComponent(tokens[idx]).toLowerCase();
+                if (availableServices.includes(sToken)) {
+                    document.getElementById('service-select').value = sToken;
+                    expertPanel.classList.add('open');
+                    expertToggle.textContent = '▲ Hide advanced options';
+                    idx++;
+                }
+            }
+
+            // remaining payload is video URL/ID
+            if (tokens.length > idx) {
+                const rawRemainder = tokens.slice(idx).join('/');
+                // clean up any double-encoding
+                document.getElementById('video-url').value = decodeURIComponent(rawRemainder);
+            }
+        }
+
+        document.getElementById('play-to-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const renderer = document.getElementById('renderer-select').value;
+            const url = document.getElementById('video-url').value.trim();
+            const service = document.getElementById('service-select').value;
+            const mode = document.getElementById('mode-select').value;
+
+            if (!url) return;
+
+            const submitBtn = document.getElementById('btn-submit');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending to Renderer...';
+            showStatus('Connecting to renderer and preparing stream...', 'loading');
+            try {
+                const res = await fetch('/api/play-to', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ renderer, url, service, mode })
+                });
+                const json = await res.json();
+
+                if (json.status === 'success') {
+                    showStatus(`▶ Playing successfully on '${json.data?.renderer || 'TV'}'!`, 'success');
+                } else {
+                    showStatus(`Error: ${json.message}`, 'error');
+                }
+            } catch (err) {
+                showStatus(`Network Error: ${err}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '▶ Play to Renderer';
+            }
+        });
+
+        async function initPage() {
+            initTheme();
+            await loadServices();
+            await loadRenderers();
+            parsePathSpecification();
+        }
+
+        initPage();
+    </script>
+</body>
+</html>

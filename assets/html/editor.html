@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>yt-dlna - Custom Playlist Editor</title>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="/icon.png">
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -65,10 +67,20 @@
                         <label>Proxy Mode</label>
                         <select id="node-mode" oninput="updateActiveNode()">
                             <option value="" id="mode-inherit-opt">Inherit from parent</option>
-                            <option value="direct">direct (source URL)</option>
-                            <option value="bounce">bounce (redirect)</option>
-                            <option value="reflect">reflect (tunnel)</option>
-                            <option value="hit">hit (action trigger, stream dummy file)</option>
+                            <optgroup label="non-resolving modes (static target URL)">
+                                <option value="direct">direct (source URL)</option>
+                                <option value="bounce">bounce (HTTP 302 to source URL)</option>
+                                <option value="reflect">reflect (tunnel from source URL)</option>
+                                <option value="hit">hit (action trigger, stream dummy file)</option>
+                            </optgroup>
+                            <optgroup label="resolving modes (CDN target URL)">
+                                <option value="default" selected>default (configured default proxy mode)</option>
+                                <option value="redirect">redirect (HTTP 302 to CDN URL)</option>
+                                <option value="proxy">proxy (tunnel from CDN URL)</option>
+                                <option value="remux">remux (force remux, configured format)</option>
+                                <option value="remux_ts">remux_ts (force remux to MPEG-TS)</option>
+                                <option value="remux_mp4">remux_mp4 (force remux to MPEG-TS)</option>
+                            </optgroup>
                         </select>
                     </div>
                     <div class="actions margin-top">

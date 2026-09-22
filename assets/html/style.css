@@ -12,6 +12,7 @@
     --border-glow: rgba(22, 198, 182, 0.3);
     --text-primary: #f8fafc;
     --text-secondary: #94a3b8;
+    --text-dimmed: #748091;
     --accent-primary: #16c6b6; /* Logo Cyan/Teal */
     --accent-secondary: #4f6d84;
     --accent-hover: #13b0a2;
@@ -31,6 +32,7 @@
     --border-glow: rgba(22, 198, 182, 0.4);
     --text-primary: #0f172a;
     --text-secondary: #64748b;
+    --text-dimmed: #8296b3;
     --accent-primary: #16c6b6; /* Logo Cyan/Teal */
     --accent-secondary: #dde4ed;
     --accent-hover: #13b0a2;
@@ -69,6 +71,7 @@ h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; }
 .subtitle { color: var(--text-secondary); font-size: 0.85rem; }
 .header-right { display: flex; align-items: center; gap: 12px; }
 .badge { background-color: var(--border-color); color: var(--accent-primary); padding: 4px 12px; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; }
+.badge-blue { font-size: 0.75rem; margin-left: 6px; padding: 2px 6px; background: color-mix(in srgb, var(--accent-blue) 20%, transparent); border: 1px solid color-mix(in srgb, var(--accent-blue) 40%, transparent); border-radius: 4px; color: var(--accent-blue); white-space: nowrap; display: inline-block; }
 
 a { color: var(--accent-blue); text-decoration: none; font-size: 1.05rem; font-weight: 600; display: block; word-break: break-word; }
 a:hover { color: var(--accent-primary); text-decoration: underline; }
@@ -118,6 +121,7 @@ li { margin-bottom: 12px; padding: 12px 16px; background-color: var(--input-bg);
 .card h3 { font-size: 1.1rem; margin-bottom: 8px; color: var(--accent-primary); }
 .card h4 { font-size: 0.95rem; margin-bottom: 8px; color: var(--text-primary); }
 .card-desc { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 16px; }
+.card-desc.margin-top { margin-top: 8px !important; }
 .card-desc-small { color: var(--text-secondary); font-size: 0.7rem; margin-bottom: 16px; }
 .card-desc details { cursor: pointer; display: inline; }
 .card-desc details summary { color: var(--accent-primary); font-weight: 600; font-size: 0.7rem; display: inline; list-style: none; }
@@ -293,6 +297,15 @@ input[type="checkbox"]:focus {
     box-shadow: none !important;
 }
 
+input::placeholder {
+    color: var(--text-dimmed);
+}
+
+input:disabled {
+    color: var(--text-dimmed);
+    -webkit-text-fill-color: var(--text-dimmed);
+}
+
 textarea.code-editor { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre; line-height: 1.4; }
 .margin-top { margin-top: 16px; }
 .margin-bottom { margin-bottom: 16px; }
@@ -323,6 +336,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 /* buttons */
 button { font-family: inherit; }
 .actions { display: flex; gap: 12px; }
+.actions.right { justify-content: flex-end; }
 .btn { padding: 10px 18px; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; white-space: nowrap; }
 .btn.primary, .btn.success { background-color: var(--accent-primary); color: #0f172a; }
 .btn.primary:hover, .btn.success:hover { background-color: var(--accent-hover); }
@@ -360,12 +374,15 @@ a.btn.disabled {
     filter: grayscale(1);
 }
 
+/* modals */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
 .modal-card { background: var(--card-solid); border: 1px solid var(--accent-primary); border-radius: 12px; padding: 24px; max-width: 500px; width: 90%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
 .modal-card h2 { color: var(--accent-primary); margin-bottom: 12px; }
+.modal-card .actions { justify-content: flex-end; }
 .modal-desc { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px; }
 .modal-desc-small { font-size: 0.7rem; }
 
+/* toast notifications */
 .toast { position: fixed; z-index: 10000; top: 20px; left: 50%; transform: translate(-50%, -30px); opacity: 0; min-width: 300px; max-width: 90%; padding: 14px 24px; border-radius: 8px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.4); font-weight: 600; text-align: center; pointer-events: none; transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease; }
 .toast.success { background-color: var(--card-solid); border: 2px solid var(--accent-primary); color: var(--accent-primary); }
 .toast.error { background-color: var(--card-solid); border: 2px solid var(--accent-red); color: var(--accent-red); }
@@ -431,9 +448,11 @@ a.btn.disabled {
     .playlist-card-header { display: grid; grid-template-areas: "title handle" "controls controls"; grid-template-columns: 1fr auto; gap: 10px; align-items: center; width: 100%; }
     .playlist-title-group { grid-area: title; min-width: 0; }
     .drag-handle { grid-area: handle; align-self: start; padding: 4px 6px; font-size: 1.4rem; cursor: grab; touch-action: none; }
-    .header-controls { grid-area: controls; width: 100%; display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
-    .header-controls .actions { width: auto !important; flex: 0 0 auto !important; flex-wrap: nowrap; gap: 6px; }
-    .header-controls .actions .btn { flex: 0 0 auto !important; width: auto !important; padding: 5px 10px; font-size: 0.75rem; }
+    .header-controls { grid-area: controls; width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .header-controls .actions { width: auto !important; max-width: 100% !important; margin-left: auto; flex: 0 1 auto !important; justify-content: flex-end; flex-wrap: wrap !important; gap: 8px; }
+    .header-controls .actions .btn { flex: 0 0 auto !important; width: auto !important; padding: 6px 10px; font-size: 0.8rem; }
+    .service-card-header .actions { width: auto !important; flex: 0 0 auto !important; margin-left: auto; }
+    .service-card-header .actions .btn { flex: 0 0 auto !important; width: auto !important; padding: 5px 10px; font-size: 0.75rem; }
     .actions { width: 100%; flex-wrap: wrap; }
     .actions .btn { flex: 1 1 auto; }
     .form-row { flex-direction: column; gap: 0; }
