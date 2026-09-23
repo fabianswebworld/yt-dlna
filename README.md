@@ -120,6 +120,8 @@ See section [Metadata and content data flow](#metadata-and-content-data-flow) fo
 
 ### Videos don't play?
 
+⚠️ ***Important:*** First of all, make sure you are *always* using the **latest version of `yt-dlp`** before attempting any further troubleshooting! ⚠️
+
 If your Smart TV refuses to play the videos on your first attempt, fear not, and **first try to change the _Default operating mode_ in the _Proxy settings_ section** on the _Settings_ tab of the Web UI from **_redirect_** to **_proxy_** (or change the `mode` setting in the `[proxy]` section of `yt-dlna.conf` from `redirect` to `proxy`). This will increase CPU and network load on the system **yt-dlna** is running on (as the streams will have to physically go into and out of the system's network interface), but it improves the chance that it will work on your TV. Just try!
 
 **If that doesn't help**, try changing the _Remux target format_ on the _Settings_ tab from **_MPEG-TS_** to **_MP4_**, which works better in some clients (but not at all in most other, which is why **_MPEG-TS_** is the default).
@@ -416,6 +418,6 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 For questions, suggestions, or bug reports regarding **yt-dlna**, please open a **GitHub Issue** or submit a **Pull Request**. 
 
-Please note that this project is an experimental proof of concept, and I cannot provide individual technical support. In particular, please refrain from submitting inquiries about unexpected playlist sort orders or layout issues on specific streaming services, as these extraction behaviors are handled entirely upstream by `yt-dlp` and I cannot do anything about it. 😉
+Please note that this project is an experimental proof of concept, and I cannot provide individual technical support. In particular, please refrain from submitting inquiries about unexpected playlist sort orders or layout issues on specific streaming services, as these extraction behaviors are handled entirely upstream by `yt-dlp`, and I cannot do anything about it. 😉 (That said, make sure you are *always* using the **latest version of `yt-dlp`** before attempting any further troubleshooting!)
 
 For general inquiries, feel free to visit my website at [fabianswebworld.de](https://www.fabianswebworld.de) (German) or check out my social media profiles.
