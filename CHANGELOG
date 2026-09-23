@@ -1,3 +1,9 @@
+1.3.1 (2026-09-23)
+
+- Improved: Much faster discovery of the Cast/UPnP bridge (DIAL server)
+- Improved: DLNA (UPnP) renderers are pruned from the "Play To" target list automatically if they have not been seen on the network for 7 days (except for the configured default renderer)
+- Fixed: The default_service setting, if set to "youtube", no longer reverts back to "auto" on each startup (only the first time after upgrading), allowing users to deliberately keep it set to "youtube" if they choose to
+
 1.3.0 (2026-09-22)
 
 - New: Introduced "Play To" feature to quickly play an online video to any DLNA (UPnP) renderer found on the network

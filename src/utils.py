@@ -19,7 +19,7 @@ import yt_dlp
 import queue
 from collections import deque
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 # step up one level to application root where config and data folders reside
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -230,7 +230,7 @@ def get_cache_count():
         except: pass
     return 0
 
-def _update_config_file(updates_dict):
+def _update_config_file(updates_dict, add_to_top_keys=None):
     """
     Config file writer: Performs non-destructive line-by-line updates to yt-dlna.conf.
     Preserves all comments, indentation, and formatting.
@@ -238,6 +238,9 @@ def _update_config_file(updates_dict):
     If a value in updates_dict is None, the key is deleted from the file.
     """
     if not os.path.exists(CONFIG_FILE): return
+    if add_to_top_keys is None:
+        add_to_top_keys = set()
+
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
@@ -269,6 +272,13 @@ def _update_config_file(updates_dict):
             processed_sections.add(current_section)
             seen_keys = set()
             new_lines.append(line)
+
+            # add keys selected for adding to top directly below section header
+            if current_section in updates_dict:
+                for k in add_to_top_keys:
+                    if k in updates_dict[current_section] and updates_dict[current_section][k] is not None:
+                        new_lines.append(f"{k} = {updates_dict[current_section][k]}\n")
+                        seen_keys.add(k)
             continue
 
         # if we are in a section targeted for updates
@@ -277,6 +287,10 @@ def _update_config_file(updates_dict):
             key = key_part.strip()
             
             if key in updates_dict[current_section]:
+                # skip if already added to the top of the section
+                if key in add_to_top_keys:
+                    continue
+
                 seen_keys.add(key)
                 new_val = updates_dict[current_section][key]
                 
@@ -323,10 +337,11 @@ def update_config_from_dict(parsed_data):
             updates[sec] = {k: (str(v) if v is not None else None) for k, v in keys.items()}
     _update_config_file(updates)
 
-def update_config_single_key(section, key, value):
+def update_config_single_key(section, key, value, add_to_top=False):
     """Updates or adds a single key in a specific section."""
     val = str(value) if value is not None else None
-    _update_config_file({section: {key: val}})
+    top_keys = {key} if add_to_top else set()
+    _update_config_file({section: {key: val}}, add_to_top_keys=top_keys)
 
 def rename_config_section(old_section, new_section):
     """Renames section header while preserving all other file content."""

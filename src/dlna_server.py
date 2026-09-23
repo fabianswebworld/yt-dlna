@@ -354,8 +354,8 @@ def resolve_target_renderer(renderer_key=None):
     if not renderers:
         return None
 
-    cfg = utils.load_config()
-    cfg_default = cfg.get('dlna', 'default_renderer', fallback='').strip()
+    config = utils.load_config()
+    config_default = config.get('dlna', 'default_renderer', fallback='').strip()
 
     # explicit key given
     if renderer_key and renderer_key not in ('default-renderer', 'default', 'last-renderer', 'last'):
@@ -366,11 +366,11 @@ def resolve_target_renderer(renderer_key=None):
                 return r
 
     # 'default-renderer' requested or key omitted; check yt-dlna.conf
-    if renderer_key in ('default-renderer', 'default', None, '') and cfg_default:
-        if cfg_default in renderers:
-            return renderers[cfg_default]
+    if renderer_key in ('default-renderer', 'default', None, '') and config_default:
+        if config_default in renderers:
+            return renderers[config_default]
         for r in renderers.values():
-            if r.get('name', '').lower() == cfg_default.lower():
+            if r.get('name', '').lower() == config_default.lower():
                 return r
 
     # 'last-renderer' requested or default unavailable; check highest last_used
@@ -704,6 +704,8 @@ def start_lounge_listener(pairing_code):
 # --- HTTP request handler (UPnP / DLNA endpoints) ---
 # ==============================================================================
 class DLNAHandler(BaseHTTPRequestHandler):
+    timeout = 10
+
     def log_message(self, format, *args): 
         pass 
 
@@ -1206,6 +1208,7 @@ class DLNAHandler(BaseHTTPRequestHandler):
 
 def run_ssdp_beacon():
     """Periodically broadcasts the 3 UPnP-required NOTIFY packets to the local network."""
+    config = utils.load_config()
     ssdp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     ssdp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, 'SO_REUSEPORT'):
@@ -1215,7 +1218,8 @@ def run_ssdp_beacon():
             pass
 
     adv_ip = DLNA_IP if DLNA_IP != '0.0.0.0' else utils.get_local_ip()
-    location = f"http://{adv_ip}:{DLNA_PORT}/desc.xml"
+    location_dlna = f"http://{adv_ip}:{DLNA_PORT}/desc.xml"
+    location_dial = f"http://{adv_ip}:{DLNA_PORT}/dd.xml"
 
     targets = [
         ("upnp:rootdevice", f"{UUID}::upnp:rootdevice"),
@@ -1223,55 +1227,79 @@ def run_ssdp_beacon():
         ("urn:schemas-upnp-org:device:MediaServer:1", f"{UUID}::urn:schemas-upnp-org:device:MediaServer:1")
     ]
 
+    dial_enabled = config.getboolean('dlna', 'enable_dial_server', fallback=True)
+
     while True:
+        # send DLNA beacons
         for nt, usn in targets:
-            ssdp_packet = (
+            dlna_packet = (
                 f"NOTIFY * HTTP/1.1\r\n"
                 f"HOST: {SSDP_ADDR}:{SSDP_PORT}\r\n"
                 f"NT: {nt}\r\n"
                 f"NTS: ssdp:alive\r\n"
                 f"USN: {usn}\r\n"
-                f"LOCATION: {location}\r\n"
+                f"LOCATION: {location_dlna}\r\n"
                 f"CACHE-CONTROL: max-age=1800\r\n"
                 f"SERVER: {SERVER_STRING}\r\n\r\n"
             ).encode('utf-8')
             try:
-                ssdp_sock.sendto(ssdp_packet, (SSDP_ADDR, SSDP_PORT))
+                ssdp_sock.sendto(dlna_packet, (SSDP_ADDR, SSDP_PORT))
             except Exception:
                 pass
+
+        # send DIAL beacons
+        if dial_enabled:
+            dial_packet = (
+                f"NOTIFY * HTTP/1.1\r\n"
+                f"HOST: {SSDP_ADDR}:{SSDP_PORT}\r\n"
+                f"NT: {DIAL_ST}\r\n"
+                f"NTS: ssdp:alive\r\n"
+                f"USN: {UUID}::{DIAL_ST}\r\n"
+                f"LOCATION: {location_dial}\r\n"
+                f"CACHE-CONTROL: max-age=1800\r\n"
+                f"SERVER: {SERVER_STRING}\r\n"
+                f"BOOTID.UPNP.ORG: 1\r\n\r\n"
+            ).encode('utf-8')
+            try:
+                ssdp_sock.sendto(dial_packet, (SSDP_ADDR, SSDP_PORT))
+            except Exception:
+                pass
+
         time.sleep(20)
 
 def run_ssdp_listener():
     """Listens for active M-SEARCH queries from clients and responds with matching ST headers."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    config = utils.load_config()
+    ssdp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    ssdp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, 'SO_REUSEPORT'):
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            ssdp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except Exception:
             pass
 
-    sock.bind(('', SSDP_PORT))
+    ssdp_sock.bind(('', SSDP_PORT))
     
     # join multicast group on all interfaces (0.0.0.0 is critical for Linux/Raspberry Pi)
     mreq = socket.inet_aton(SSDP_ADDR) + socket.inet_aton('0.0.0.0')
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    ssdp_sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
     actual_ip = DLNA_IP if DLNA_IP != '0.0.0.0' else utils.get_local_ip()
     location_dlna = f"http://{actual_ip}:{DLNA_PORT}/desc.xml"
     location_dial = f"http://{actual_ip}:{DLNA_PORT}/dd.xml"
 
+    dial_enabled = config.getboolean('dlna', 'enable_dial_server', fallback=True)
+
     while True:
         try:
-            data, addr = sock.recvfrom(2048)
+            data, addr = ssdp_sock.recvfrom(2048)
             message = data.decode('utf-8', errors='ignore')
             
             if "M-SEARCH" in message:
                 msg_lower = message.lower()
                 
                 # handle DIAL queries
-                cfg = utils.load_config()
-                if "service:dial:1" in msg_lower and cfg.getboolean('dlna', 'enable_dial_server', fallback=True):
+                if "service:dial:1" in msg_lower and dial_enabled:
                     dial_response = (
                         f"HTTP/1.1 200 OK\r\n"
                         f"CACHE-CONTROL: max-age=1800\r\n"
@@ -1284,7 +1312,7 @@ def run_ssdp_listener():
                         f"BOOTID.UPNP.ORG: 1\r\n"
                         f"CONTENT-LENGTH: 0\r\n\r\n"
                     ).encode('utf-8')
-                    sock.sendto(dial_response, addr)
+                    ssdp_sock.sendto(dial_response, addr)
                     continue
 
                 # build list of target responses matching client request
@@ -1305,8 +1333,9 @@ def run_ssdp_listener():
                 else:
                     responses = [("upnp:rootdevice", f"{UUID}::upnp:rootdevice")]
 
+                # handle DLNA queries
                 for st_val, usn_val in responses:
-                    response = (
+                    dlna_response = (
                         f"HTTP/1.1 200 OK\r\n"
                         f"CACHE-CONTROL: max-age=1800\r\n"
                         f"DATE: {time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime())}\r\n"
@@ -1318,7 +1347,7 @@ def run_ssdp_listener():
                         f"CONTENT-LENGTH: 0\r\n"
                         f"\r\n"
                     )
-                    sock.sendto(response.encode('utf-8'), addr)
+                    ssdp_sock.sendto(dlna_response.encode('utf-8'), addr)
         except Exception:
             time.sleep(0.5)
 
@@ -1389,15 +1418,33 @@ def scan_for_renderers():
             break
 
     sock.close()
+    config = utils.load_config()
+    config_default = config.get('dlna', 'default_renderer', fallback='').strip().lower()
+    now = time.time()
+    # inactivity timeout of 7 days
+    ttl_limit = 7 * 86400
+
+    pruned_renderers = {}
+    for udn_key, r_info in discovered.items():
+        is_default = (udn_key.lower() == config_default) or (r_info.get('name', '').lower() == config_default)
+        last_seen = r_info.get('last_seen', 0)
+
+        # prune renderes not seen in the last 7 days, except configured default renderer
+        if is_default or (now - last_seen <= ttl_limit):
+            pruned_renderers[udn_key] = r_info
+        else:
+            changed = True
+            utils.log(_LOG_SRC, f"UPnP renderer '{r_info.get('name', udn_key)}' gone for 7 days, pruned from list.")
+
     if changed:
-        save_renderers(discovered)
+        save_renderers(pruned_renderers)
 
 def run_renderer_scanner():
     """Background worker that periodically refreshes the active renderers list."""
     time.sleep(3)
     while True:
-        cfg = utils.load_config()
-        if cfg.getboolean('dlna', 'enable_renderer_discovery', fallback=True):
+        config = utils.load_config()
+        if config.getboolean('dlna', 'enable_renderer_discovery', fallback=True):
             try:
                 scan_for_renderers()
             except Exception as e:

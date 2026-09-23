@@ -132,44 +132,62 @@ def main():
     if not args.serve and args.sync is None:
         sys.exit(0)
 
-    # auto-migrate old format_dash selectors and add auto service
+    # settings auto-migration
     if args.serve or args.sync is not None:
         config = utils.load_config()
-        old_dash = "(137/136/135)+140"
-        new_dash = "bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]"
-        dash_replaced = False
-        for section in config.sections():
-            if section == 'services' or section.startswith('services:'):
-                if config.get(section, 'format_dash', fallback='').strip() == old_dash:
-                    utils.update_config_single_key(section, 'format_dash', new_dash)
-                    dash_replaced = True
 
-        if dash_replaced:
-            utils.log(_LOG_SRC, "Upgrade notice: Replaced old format_dash selectors with new selector.", "init", type='S')
-            config = utils.load_config(force_reload=True)
+        # parse config schema version (major, minor)
+        raw_ver = config.get('general', 'config_version', fallback='').strip().lstrip('v')
+        try:
+            cfg_version = tuple(int(x) for x in raw_ver.split('.')[:2])
+        except Exception:
+            cfg_version = (0, 0)
+        old_cfg_version = cfg_version
 
-        if not config.has_section('services:auto'):
-            utils.update_config_single_key('services:auto', 'format_dash', new_dash)
-            utils.update_config_single_key('services:auto', 'cache_ttl', '18000')
-            utils.update_config_single_key('services:auto', 'title_format', '{index}. {channel}: {title} ({duration})')
+        # v1.3: migrate old format_dash selectors and add auto service
+        if cfg_version < (1, 3):
+            old_dash = "(137/136/135)+140"
+            new_dash = "bv*[vcodec^=avc][height<=1080]+ba[acodec^=mp4a]"
+            dash_replaced = False
+            for section in config.sections():
+                if section == 'services' or section.startswith('services:'):
+                    if config.get(section, 'format_dash', fallback='').strip() == old_dash:
+                        utils.update_config_single_key(section, 'format_dash', new_dash)
+                        dash_replaced = True
 
-            existing_services = [s.replace('services:', '') for s in config.sections() if s.startswith('services:')]
-            reordered = ['auto'] + [s for s in existing_services if s != 'auto']
-            utils.reorder_config_sections('services', reordered)
+            if dash_replaced:
+                utils.log(_LOG_SRC, "Upgrade notice: Replaced old format_dash selectors with new selector.", "init", level=2, type='S')
+                config = utils.load_config(force_reload=True)
 
-            utils.log(_LOG_SRC, "Upgrade notice: Created 'auto' service profile.", "init", type='S')
-            config = utils.load_config(force_reload=True)
+            if not config.has_section('services:auto'):
+                utils.update_config_single_key('services:auto', 'format_dash', new_dash)
+                utils.update_config_single_key('services:auto', 'cache_ttl', '18000')
+                utils.update_config_single_key('services:auto', 'title_format', '{index}. {channel}: {title} ({duration})')
 
-        if config.get('playlists', 'default_service', fallback='').strip().lower() == 'youtube':
-            utils.update_config_single_key('playlists', 'default_service', 'auto')
-            pinned_count = 0
-            for sec in config.sections():
-                if sec.startswith('playlists:'):
-                    if 'service' not in config[sec]:
-                        utils.update_config_single_key(sec, 'service', 'youtube')
-                        pinned_count += 1
+                existing_services = [s.replace('services:', '') for s in config.sections() if s.startswith('services:')]
+                reordered = ['auto'] + [s for s in existing_services if s != 'auto']
+                utils.reorder_config_sections('services', reordered)
 
-            utils.log(_LOG_SRC, f"Upgrade notice: Changed default_service from 'youtube' to 'auto' and updated {pinned_count} playlist(s).", "init", type='S')
+                utils.log(_LOG_SRC, "Upgrade notice: Created 'auto' service profile.", "init", level=2, type='S')
+                config = utils.load_config(force_reload=True)
+
+            if config.get('playlists', 'default_service', fallback='').strip().lower() == 'youtube':
+                utils.update_config_single_key('playlists', 'default_service', 'auto')
+                pinned_count = 0
+                for sec in config.sections():
+                    if sec.startswith('playlists:'):
+                        if 'service' not in config[sec]:
+                            utils.update_config_single_key(sec, 'service', 'youtube', add_to_top=True)
+                            pinned_count += 1
+
+                utils.log(_LOG_SRC, f"Upgrade notice: Changed default_service from 'youtube' to 'auto' and updated {pinned_count} playlist(s).", "init", level=2, type='S')
+                config = utils.load_config(force_reload=True)
+
+            utils.update_config_single_key('general', 'config_version', '1.3', add_to_top=True)
+            cfg_version = (1, 3)
+
+        if cfg_version > old_cfg_version:
+            utils.log(_LOG_SRC, f"Upgrade notice: Settings migrated, config_version set to {cfg_version[0]}.{cfg_version[1]}.", "init", level=2, type='S')
             config = utils.load_config(force_reload=True)
 
     # execute immediate/startup sync if requested
