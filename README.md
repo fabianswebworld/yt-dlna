@@ -299,7 +299,7 @@ Items in Custom Playlists will, by default, _not_ be resolved to CDN URLs via th
 - _hit_ mode, which will just "hit" the source URL from the backend (and will serve a silent dummy audio file to the client) - ideal for triggering actions in your home automation system (see below).
 - _direct_ mode, which will just insert the plain source URL into the DLNA listing (for clients that allow media from outside the local network).
 
-Starting with version 1.3.0, the known **resolving proxy modes** (as described above) are available for Custom Playlists as well. If selected, proactive pre-resolving is also done for those lists. This allows for locally-curated, multi-service "Watch Later" playlists, and a new "Quick Add" UI has been introduced to quickly add any video by its web page URL to those lists.
+Starting with version 1.3.0, the known **resolving proxy modes** (as described above under [About proxy modes](#about-proxy-modes)) are available for Custom Playlists as well. If selected, proactive pre-resolving is also done for those lists. This allows for locally-curated, multi-service "Watch Later" playlists, and a new "Quick Add" UI has been introduced to quickly add any video by its web page URL to those lists.
 
 ### Integration with Home Automation systems
 
