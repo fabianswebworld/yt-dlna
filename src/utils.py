@@ -19,7 +19,7 @@ import yt_dlp
 import queue
 from collections import deque
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 # step up one level to application root where config and data folders reside
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

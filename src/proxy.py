@@ -12,6 +12,7 @@ import socket
 import urllib.parse
 import subprocess
 import threading
+import time
 import requests
 from flask import Flask, redirect, request, Response, stream_with_context
 import flask.cli
@@ -32,6 +33,10 @@ app = Flask(__name__)
 
 # disable automatic Werkzeug URL slash collapsing and 308 redirects
 app.url_map.merge_slashes = False
+
+# cache for debouncing requests to the same URL in 'hit' mode
+_hit_cache = {}
+_hit_lock = threading.Lock()
 
 def log_ffmpeg_stderr(proc):
     """Background helper to log ffmpeg error output and close pipe safely."""
@@ -414,12 +419,29 @@ def _static_internal(target_url, mode):
         return _serve_proxy_implementation(url, f"static:{url}")
         
     elif mode == 'hit':
-        utils.log(_LOG_SRC, f"Hitting static URL: {utils.short(url)}", level=-3)
-        utils.log(_LOG_SRC, f"Hitting static URL: {url}", level=4)
-        try:
-            requests.get(url, timeout=5)
-        except Exception as e:
-            utils.log(_LOG_SRC, f"Hit failed: {e}", level=1, type='E')
+        now = time.time()
+        should_hit = True
+        
+        with _hit_lock:
+            # cleanup old debounce entries
+            expired = [k for k, v in _hit_cache.items() if now - v > 2]
+            for k in expired:
+                del _hit_cache[k]
+            if url in _hit_cache:
+                should_hit = False
+            else:
+                _hit_cache[url] = now
+
+        if should_hit:
+            utils.log(_LOG_SRC, f"Hitting static URL: {utils.short(url)}", level=-3)
+            utils.log(_LOG_SRC, f"Hitting static URL: {url}", level=4)
+            try:
+                requests.get(url, timeout=5)
+            except Exception as e:
+                utils.log(_LOG_SRC, f"Hit failed: {e}", level=1, type='E')
+        else:
+            utils.log(_LOG_SRC, f"Debounced duplicate hit for URL: {utils.short(url)}", level=-3)
+            utils.log(_LOG_SRC, f"Debounced duplicate hit for URL: {url}", level=4)
         return _serve_dummy_file()
 
 # --- Implementation of proxy modes ---
@@ -543,10 +565,9 @@ def _serve_remux_implementation(cached_entry, identifier, target_format_override
     # --- debug output ---
     utils.log(_LOG_SRC, f"Calling command: {' '.join(cmd)}", "ffmpeg", level=5, type='D')
 
-    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    threading.Thread(target=log_ffmpeg_stderr, args=(proc,), daemon=True).start()
-
     def generate_remux():
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        threading.Thread(target=log_ffmpeg_stderr, args=(proc,), daemon=True).start()
         try:
             while True:
                 chunk = proc.stdout.read(chunk_size)
@@ -563,7 +584,9 @@ def _serve_remux_implementation(cached_entry, identifier, target_format_override
                 utils.log(_LOG_SRC, f"Cleaning up FFmpeg process for {identifier}...", "ffmpeg")
                 try:
                     proc.stdout.close()
-                    proc.stderr.close()
+                except Exception:
+                    pass
+                try:
                     proc.terminate()
                     try:
                         proc.wait(timeout=2)
