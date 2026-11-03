@@ -311,9 +311,9 @@ An example implementation of a helper module for the _FHEM_ home automation syst
 
 ## About the sync scheduler
 
-With **yt-dlna** version 1.2.0, the sync scheduler has been completely reworked and now supports different sync invervals for individual playlists, and allows for excluding individual playlists from scheduled sync altogether.
+With **yt-dlna** version 1.2.0, the sync scheduler has been completely reworked and now supports different sync intervals for individual playlists, and allows for excluding individual playlists from scheduled sync altogether.
 
-The old scheduler only had one single sync interval, and this started always at the point the daemon was started. So, when reloading the daemon several times (when maybe experementing with different settings), each time a complete sync run was triggered. Also, the fact that one sync run always synced all playlists, this meant a long CPU spike at regular intervals on slower hardware.
+The old scheduler only had one single sync interval, and this started always at the point the daemon was started. So, when reloading the daemon several times (when maybe experimenting with different settings), each time a complete sync run was triggered. Also, the fact that one sync run always synced all playlists, this meant a long CPU spike at regular intervals on slower hardware.
 
 The new scheduler avoids this, by letting you set playlists that do not frequently change to a higher sync interval. Moreover, it persistently stores the last sync time for each playlist, so that if you stop the daemon and restart it later, it will only catch up sync for those playlists where it is necessary, instead of triggering a full sync run even after a short interruption of the service (e.g. daemon restart or system reboot).
 
